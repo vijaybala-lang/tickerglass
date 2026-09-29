@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=TickerGlass
+GenericName=Stock Watch
+Comment=Sparkline market watch powered by Yahoo Finance
+Exec=gjs -m @TICKERGLASS_DIR@/main.js
+TryExec=gjs
+Icon=org.gnome.Desktop-symbolic
+Terminal=false
+Categories=Office;Finance;
+Keywords=stocks;quotes;market;finance;yahoo;portfolio;
+StartupWMClass=dev.vijaybala.TickerGlass
+DBusActivatable=false

@@ -1,0 +1,73 @@
+/* TickerGlass app — libadwaita styling. Cards/chips adapt to Adwaita light
+ * and dark automatically via named colors; only finance-specific bits are
+ * pinned here. */
+
+.tg-hero-sym   { font-weight: 800; font-size: 1.15em; }
+.tg-hero-price { font-weight: 200; font-size: 2.2em; }
+.tg-hero-price.tg-up   { color: alpha(@green_3, 0.95); }
+.tg-hero-price.tg-down { color: alpha(@red_2, 1); }
+.tg-up   { color: @success-color; }
+.tg-down { color: @error-color; }
+@define-color success-color alpha(@green_3, 1);
+@define-color error-color   alpha(@red_2, 1);
+
+/* ± pill under the big price */
+.tg-pill {
+  font-weight: 700;
+  padding: 2px 12px;
+  border-radius: 99px;
+}
+.tg-up-soft {
+  background-color: alpha(@green_3, 0.16);
+  color: @green_3;
+  border: 1px solid alpha(@green_3, 0.4);
+}
+.tg-down-soft {
+  background-color: alpha(@red_2, 0.14);
+  color: @red_2;
+  border: 1px solid alpha(@red_2, 0.4);
+}
+
+/* range chips */
+.tg-chip {
+  padding: 2px 13px;
+  border-radius: 99px;
+  border: 1px solid alpha(currentcolor, 0.18);
+  background: none;
+  font-weight: 600;
+  font-size: 0.85em;
+  min-height: 0;
+}
+.tg-chip:hover { background: alpha(currentcolor, 0.08); }
+.tg-chip-active {
+  background: alpha(currentcolor, 0.14);
+  border-color: alpha(currentcolor, 0.35);
+}
+
+/* static stat chips under the hero price */
+.tg-chip-static {
+  padding: 1px 10px;
+  border-radius: 99px;
+  background: alpha(currentcolor, 0.06);
+  border: 1px solid alpha(currentcolor, 0.10);
+}
+
+/* chart area */
+.tg-chart-area { border-radius: 12px; }
+
+/* table change columns inherit .tg-up/.tg-down */
+.tg-col-change { font-weight: 600; }
+
+/* table: header + rows */
+.tg-thead { padding: 0; }
+.tg-th { font-weight: 700; font-size: 0.8em; padding: 2px 10px;
+         border-radius: 8px; opacity: 0.75; min-height: 0; }
+.tg-th:hover { background: alpha(currentcolor, 0.07); }
+.tg-th-active { opacity: 1; background: alpha(currentcolor, 0.10); }
+list row { border-radius: 8px; }
+
+/* sidebar count pill */
+.sidebar row:selected { border-radius: 8px; }
+
+/* dialogs */
+.dlg-pad { padding: 18px; }

@@ -1,0 +1,9 @@
+{
+  "uuid": "tickerglass@vijaybala.dev",
+  "name": "TickerGlass",
+  "description": "A little window onto the market: a live sparkline of your lead symbol in the panel, and a portfolio card with animated charts, sparkline rows and watchlists — powered by Yahoo Finance, no API key, paired with the TickerGlass app.",
+  "shell-version": ["50"],
+  "settings-schema": "org.gnome.shell.extensions.tickerglass",
+  "url": "https://vijaybala.dev",
+  "version": 1
+}

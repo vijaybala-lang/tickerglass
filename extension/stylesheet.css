@@ -1,0 +1,100 @@
+/* TickerGlass — shell widgets. Conventions from weatherglass: every hook is
+ * tg- prefixed, glass fills over the popup, hierarchy via font-weight not
+ * opacity, double-declaration accent fallback. */
+
+/* ── panel ──────────────────────────────────────────────────────────────── */
+.tg-panel-box { spacing: 5px; padding: 0 2px; }
+.tg-panel-spark { margin-right: 1px; }
+.tg-panel-price { font-weight: 700; }
+.tg-panel-sym { font-weight: 600; }
+.tg-panel-chg { font-weight: 500; font-size: 0.9em; }
+
+/* up/down ink: bright enough for dark panels, deep enough for light ones */
+.tg-panel-box.tg-dark .tg-up   { color: #46d98b; }
+.tg-panel-box.tg-dark .tg-down { color: #ff7a80; }
+.tg-panel-box.tg-light .tg-up   { color: #0c8a4e; }
+.tg-panel-box.tg-light .tg-down { color: #c93b42; }
+
+/* ── popup chrome ───────────────────────────────────────────────────────── */
+/* compound selector outranks the theme's popup padding (weatherglass trick) */
+.tg-menu.popup-menu-content,
+.tg-menu .popup-menu-content { padding: 0; }
+
+.tg-content {
+  width: 330px;
+  min-height: 380px;
+  border-radius: 18px;
+  padding: 12px 0 8px 0;      /* rows pad themselves 14px; chart bleeds */
+}
+
+.tg-placeholder { min-height: 360px; }
+.tg-placeholder-text { color: rgba(255, 255, 255, 0.66); }
+
+/* ── rows layout ────────────────────────────────────────────────────────── */
+.tg-header { padding: 2px 14px 6px; spacing: 8px; }
+.tg-main { spacing: 2px; }
+
+.tg-wl-btn { border-radius: 99px; padding: 4px 12px; background-color: transparent;
+             border: 1px solid transparent; }
+.tg-wl { font-weight: 700; font-size: 1.0em; }
+.tg-wl-sub { font-size: 0.75em; color: rgba(255, 255, 255, 0.55); }
+
+.tg-status { font-size: 0.8em; font-weight: 600; }
+.tg-status-open { color: #46d98b; }
+.tg-status-shut { color: rgba(255, 255, 255, 0.55); }
+
+.tg-icon-btn { border-radius: 99px; padding: 5px; min-width: 24px; min-height: 24px;
+               icon-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); }
+.tg-icon-btn:hover { background-color: rgba(255, 255, 255, 0.14); }
+.tg-icon-btn:active { background-color: rgba(255, 255, 255, 0.22); }
+.tg-icon-btn:focus { border-color: rgba(255, 255, 255, 0.25); }
+
+/* ── hero ───────────────────────────────────────────────────────────────── */
+.tg-hero { padding: 2px 14px 4px; spacing: 10px; }
+.tg-hero-sym { font-weight: 700; font-size: 1.15em; }
+.tg-hero-name { font-size: 0.8em; color: rgba(255, 255, 255, 0.6);
+                max-width: 150px; }
+.tg-hero-price { font-size: 2.4em; font-weight: 200; }
+.tg-pill { font-size: 0.85em; font-weight: 700; border-radius: 99px;
+           padding: 2px 10px; }
+.tg-pill-up { background-color: rgba(46, 194, 126, 0.22);
+              color: #46d98b; border: 1px solid rgba(46, 194, 126, 0.4); }
+.tg-pill-down { background-color: rgba(224, 87, 92, 0.20);
+                color: #ff7a80; border: 1px solid rgba(224, 87, 92, 0.4); }
+
+/* ── range chips ────────────────────────────────────────────────────────── */
+.tg-tabs { padding: 2px 14px 6px; spacing: 6px; }
+.tg-tab { border-radius: 99px; padding: 2px 11px; background-color: transparent;
+          border: 1px solid rgba(255, 255, 255, 0.14); }
+.tg-tab:hover { background-color: rgba(255, 255, 255, 0.10); }
+.tg-tab-label { font-size: 0.8em; font-weight: 600; }
+.tg-tab-active { background-color: rgba(255, 255, 255, 0.22);
+                 border-color: rgba(255, 255, 255, 0.30); }
+.tg-chart { margin: 0; }
+
+/* ── symbol rows ────────────────────────────────────────────────────────── */
+.tg-rows { padding: 4px 8px 2px; spacing: 1px; }
+.tg-row { border-radius: 12px; padding: 0; border: 1px solid transparent;
+          background-color: transparent; }
+.tg-row:hover { background-color: rgba(255, 255, 255, 0.09); }
+.tg-row:active { background-color: rgba(255, 255, 255, 0.16); }
+.tg-row:focus { border-color: rgba(255, 255, 255, 0.25); }
+.tg-row-sel { background-color: rgba(16, 20, 28, 0.45);
+              border-color: rgba(255, 255, 255, 0.18); }
+.tg-rowbox { spacing: 10px; padding: 5px 8px; }
+.tg-row-spark { margin-right: 2px; }
+.tg-row-symcol { spacing: 0; }
+.tg-row-sym { font-weight: 600; font-size: 0.9em; }
+.tg-row-name { font-size: 0.75em; color: rgba(255, 255, 255, 0.55);
+               max-width: 105px; }
+.tg-row-price { font-weight: 600; font-size: 0.9em; }
+.tg-row-chg { font-size: 0.75em; font-weight: 600; }
+.tg-rows .tg-up { color: #46d98b; }
+.tg-rows .tg-down { color: #ff7a80; }
+
+/* ── footer ─────────────────────────────────────────────────────────────── */
+.tg-foot { padding: 4px 14px 0; spacing: 6px; }
+.tg-updated { font-size: 0.75em; color: rgba(255, 255, 255, 0.45); }
+
+/* ── light shell theme (Yaru-light & friends) ───────────────────────────── */
+.tg-content.tg-light-ink .tg-placeholder-text { color: rgba(16, 24, 35, 0.6); }

@@ -1,0 +1,337 @@
+/* prefs.js — Adw preferences (ExtensionPreferences: the shell constructs the
+ * window, we just fill it). All edits write gsettings immediately; the
+ * running extension reacts live, no restart dance (weatherglass rule). */
+
+import GLib from 'gi://GLib';
+import Gio from 'gi://Gio';
+import GObject from 'gi://GObject';
+import Adw from 'gi://Adw';
+import Gtk from 'gi://Gtk';
+
+import {ExtensionPreferences}
+    from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
+
+import {initI18n, _} from './i18n.js';
+import {textPrompt} from './prompt.js';
+import {parseWatchlists, stringifyWatchlists, RANGES, RANGE_LABEL,
+        INTERVALS, INTERVAL_LABEL} from './fmt.js';
+
+/* a deletable list row (prefs.js ResultRow pattern, generalized) */
+const SymbolRow = GObject.registerClass(
+class SymbolRow extends Adw.ActionRow {
+    constructor(symbol, onRemove) {
+        super({title: symbol});
+        const btn = new Gtk.Button({
+            icon_name: 'user-trash-symbolic',
+            valign: Gtk.Align.CENTER,
+        });
+        btn.add_css_class('flat');
+        btn.add_css_class('dim-label');
+        btn.connect('clicked', () => onRemove(symbol));
+        this.add_suffix(btn);
+    }
+});
+
+export default class TickerGlassPrefs extends ExtensionPreferences {
+    fillPreferencesWindow(window) {
+        initI18n(this.uuid, this.dir.get_path());
+        const settings = this.getSettings();
+        window.set_default_size(560, 640);
+
+        window.add(this._watchlistsPage(settings));
+        window.add(this._panelPage(settings));
+        window.add(this._dataPage(settings));
+        window.add(this._aboutPage());
+    }
+
+    /* ── watchlists ────────────────────────────────────────────────────── */
+
+    _read(settings) {
+        return parseWatchlists(settings.get_string('watchlists'));
+    }
+
+    _write(settings, lists) {
+        settings.set_string('watchlists', stringifyWatchlists(lists));
+    }
+
+    _watchlistsPage(settings) {
+        const page = new Adw.PreferencesPage({
+            title: _('Watchlists'), icon_name: 'view-list-symbolic',
+        });
+
+        /* active picker */
+        const pickGroup = new Adw.PreferencesGroup();
+        const activeRow = new Adw.ComboRow({title: _('Active watchlist')});
+        const refreshActive = () => {
+            const lists = this._read(settings);
+            activeRow.model = new Gtk.StringList({
+                strings: lists.map(w => w.name),
+            });
+            const id = settings.get_string('active-watchlist');
+            const i = lists.findIndex(w => w.id === id);
+            activeRow.selected = i < 0 ? 0 : i;
+        };
+        activeRow.connect('notify::selected', () => {
+            const lists = this._read(settings);
+            const wl = lists[activeRow.selected];
+            if (wl)
+                settings.set_string('active-watchlist', wl.id);
+        });
+        pickGroup.add(activeRow);
+
+        const addBtn = new Adw.ActionRow({title: _('Create a new watchlist')});
+        const addOuter = new Gtk.Button({child: addBtn});
+        addOuter.add_css_class('flat');
+        addOuter.connect('clicked', () => {
+            textPrompt({
+                parent: window,
+                title: _('Watchlist name'),
+                acceptLabel: _('Create'),
+                onAccept: name => {
+                    const lists = this._read(settings);
+                    const id = `wl${Date.now()}`;
+                    lists.push({id, name, symbols: []});
+                    this._write(settings, lists);
+                    settings.set_string('active-watchlist', id);
+                },
+            });
+        });
+        pickGroup.add(addOuter);
+        page.add(pickGroup);
+
+        /* one expander per watchlist */
+        const listGroup = new Adw.PreferencesGroup();
+        page.add(listGroup);
+
+        const rebuild = () => {
+            for (let ch = listGroup.get_last_child(); ch;
+                 ch = listGroup.get_last_child())
+                listGroup.remove(ch);
+            const lists = this._read(settings);
+            for (const wl of lists) {
+                const exp = new Adw.ExpanderRow({
+                    title: wl.name,
+                    subtitle: `${wl.symbols.length} ${_('symbols')}`,
+                });
+
+                const addRow = new Adw.EntryRow({
+                    title: _('Symbol (AAPL, ^GSPC, BTC-USD, EURUSD=X…)'),
+                });
+                const commit = () => {
+                    const sym = addRow.get_text().trim().toUpperCase();
+                    if (!sym || wl.symbols.includes(sym)) {
+                        addRow.add_css_class('error');
+                        return;
+                    }
+                    addRow.remove_css_class('error');
+                    wl.symbols.push(sym);
+                    this._write(settings, lists);
+                };
+                addRow.connect('entry-activated', commit);
+                exp.add_row(addRow);
+
+                for (const sym of [...wl.symbols]) {
+                    exp.add_row(new SymbolRow(sym, s => {
+                        wl.symbols = wl.symbols.filter(x => x !== s);
+                        this._write(settings, lists);
+                    }));
+                }
+
+                const renameBtn = new Gtk.Button({
+                    icon_name: 'document-edit-symbolic',
+                    valign: Gtk.Align.CENTER, tooltip_text: _('Rename'),
+                });
+                renameBtn.add_css_class('flat');
+                renameBtn.connect('clicked', () => {
+                    textPrompt({
+                        parent: window,
+                        title: _('Watchlist name'),
+                        initial: wl.name,
+                        onAccept: name => {
+                            wl.name = name;
+                            this._write(settings, lists);
+                        },
+                    });
+                });
+                exp.add_prefix(renameBtn);
+
+                const delBtn = new Gtk.Button({
+                    icon_name: 'user-trash-symbolic',
+                    valign: Gtk.Align.CENTER, tooltip_text: _('Delete list'),
+                });
+                delBtn.add_css_class('flat');
+                delBtn.connect('clicked', () => {
+                    const keep = lists.filter(w => w.id !== wl.id);
+                    if (!keep.length)
+                        return;                       // never empty everything
+                    this._write(settings, keep);
+                    if (settings.get_string('active-watchlist') === wl.id)
+                        settings.set_string('active-watchlist', keep[0].id);
+                });
+                exp.add_suffix(delBtn);
+
+                listGroup.add(exp);
+            }
+            refreshActive();
+        };
+        rebuild();
+        settings.connect('changed::watchlists', rebuild);   // live app edits
+        return page;
+    }
+
+    /* ── panel ─────────────────────────────────────────────────────────── */
+
+    _panelPage(settings) {
+        const page = new Adw.PreferencesPage({
+            title: _('Panel'), icon_name: 'preferences-system-symbolic',
+        });
+        const g = new Adw.PreferencesGroup({title: _('In the top bar')});
+
+        const modeIds = ['sparkline', 'ticker', 'price'];
+        const modeRow = new Adw.ComboRow({
+            title: _('Presentation'),
+            model: new Gtk.StringList({
+                strings: [_('Sparkline of the lead symbol'),
+                          _('Rolling ticker of the whole watchlist'),
+                          _('Price only')],
+            }),
+        });
+        modeRow.selected = Math.max(0, modeIds.indexOf(
+            settings.get_string('panel-mode')));
+        modeRow.connect('notify::selected', () =>
+            settings.set_string('panel-mode', modeIds[modeRow.selected]));
+        g.add(modeRow);
+
+        const leadRow = new Adw.ComboRow({title: _('Lead symbol')});
+        const refreshLead = () => {
+            const syms = this._read(settings)
+                .find(w => w.id === settings.get_string('active-watchlist'))
+                ?.symbols ?? [];
+            leadRow.model = new Gtk.StringList({
+                strings: [_('(first in watchlist)'), ...syms],
+            });
+            const lead = settings.get_string('panel-lead-symbol');
+            const i = syms.indexOf(lead);
+            leadRow.selected = i + 1 > 0 ? i + 1 : 0;
+        };
+        leadRow.connect('notify::selected', () =>
+            settings.set_string('panel-lead-symbol',
+                leadRow.selected === 0 ? ''
+                    : leadRow.model.getString(leadRow.selected)));
+        refreshLead();
+        settings.connect('changed::watchlists', refreshLead);
+        g.add(leadRow);
+
+        const chgRow = new Adw.SwitchRow({
+            title: _('Show change'), subtitle: _('± % next to the price'),
+        });
+        settings.bind('panel-show-change', chgRow, 'active',
+                      Gio.SettingsBindFlags.DEFAULT);
+        g.add(chgRow);
+
+        const sparkIds = ['1d', '5d'];
+        const sparkRow = new Adw.ComboRow({
+            title: _('Sparkline window'),
+            subtitle: _('What the panel curve covers'),
+            model: new Gtk.StringList({
+                strings: [_('Today'), _('Last 5 days')]}),
+        });
+        sparkRow.selected = Math.max(0, sparkIds.indexOf(
+            settings.get_string('panel-spark-range')));
+        sparkRow.connect('notify::selected', () =>
+            settings.set_string('panel-spark-range',
+                                sparkIds[sparkRow.selected]));
+        g.add(sparkRow);
+        page.add(g);
+        return page;
+    }
+
+    /* ── data & chart ──────────────────────────────────────────────────── */
+
+    _dataPage(settings) {
+        const page = new Adw.PreferencesPage({
+            title: _('Data & Chart'), icon_name: 'network-server-symbolic',
+        });
+
+        const g1 = new Adw.PreferencesGroup({title: _('Market data')});
+        const srcRow = new Adw.ComboRow({
+            title: _('Data source'),
+            subtitle: _('Yahoo Finance needs no account; demo generates ' +
+                        'plausible offline data'),
+            model: new Gtk.StringList({
+                strings: ['Yahoo Finance', _('Demo (offline)')]}),
+        });
+        const srcIds = ['yahoo', 'demo'];
+        srcRow.selected = Math.max(0, srcIds.indexOf(
+            settings.get_string('data-source')));
+        srcRow.connect('notify::selected', () =>
+            settings.set_string('data-source', srcIds[srcRow.selected]));
+        g1.add(srcRow);
+
+        const refreshRow = new Adw.SpinRow.new_with_range(
+            15, 3600, 15);
+        refreshRow.title = _('Refresh quotes every');
+        settings.bind('refresh-seconds', refreshRow.get_adjustment(), 'value',
+                      Gio.SettingsBindFlags.DEFAULT);
+        g1.add(refreshRow);
+        page.add(g1);
+
+        const g2 = new Adw.PreferencesGroup({title: _('Chart defaults')});
+        const styleIds = ['area', 'line', 'candles'];
+        const styleRow = new Adw.ComboRow({
+            title: _('Style'),
+            model: new Gtk.StringList({
+                strings: [_('Area'), _('Line'), _('Candlesticks')]}),
+        });
+        styleRow.selected = Math.max(0, styleIds.indexOf(
+            settings.get_string('chart-style')));
+        styleRow.connect('notify::selected', () =>
+            settings.set_string('chart-style', styleIds[styleRow.selected]));
+        g2.add(styleRow);
+
+        const rangeRow = new Adw.ComboRow({title: _('Default range')});
+        rangeRow.model = new Gtk.StringList({strings: RANGES.map(r => RANGE_LABEL[r])});
+        rangeRow.selected = Math.max(0, RANGES.indexOf(
+            settings.get_string('chart-range')));
+        rangeRow.connect('notify::selected', () =>
+            settings.set_string('chart-range', RANGES[rangeRow.selected]));
+        g2.add(rangeRow);
+
+        const ivIds = ['auto', ...INTERVALS];
+        const ivRow = new Adw.ComboRow({
+            title: _('Interval'),
+            subtitle: _('auto matches Yahoo’s own defaults per range'),
+            model: new Gtk.StringList({
+                strings: [_('Auto'), ...INTERVALS.map(iv => INTERVAL_LABEL[iv])]}),
+        });
+        ivRow.selected = Math.max(0, ivIds.indexOf(
+            settings.get_string('chart-interval')));
+        ivRow.connect('notify::selected', () =>
+            settings.set_string('chart-interval', ivIds[ivRow.selected]));
+        g2.add(ivRow);
+        page.add(g2);
+        return page;
+    }
+
+    /* ── about ─────────────────────────────────────────────────────────── */
+
+    _aboutPage() {
+        const page = new Adw.PreferencesPage({
+            title: _('About'), icon_name: 'help-about-symbolic',
+        });
+        const g = new Adw.PreferencesGroup();
+        g.add(new Adw.ActionRow({
+            title: 'TickerGlass',
+            subtitle: _('Sparkline ticker for GNOME — quotes by Yahoo ' +
+                        'Finance, no account, no tracking. Edits here live ' +
+                        'in sync with the TickerGlass app.'),
+        }));
+        g.add(new Adw.ActionRow({
+            title: _('Privacy'),
+            subtitle: _('Requests go straight from this machine to ' +
+                        'finance.yahoo.com; nothing is cached on disk.'),
+        }));
+        page.add(g);
+        return page;
+    }
+}
