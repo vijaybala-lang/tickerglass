@@ -101,7 +101,7 @@ export class DemoClient {
         return Math.floor(GLib.get_real_time() / 1e6);
     }
 
-    async quotes(symbols) {
+    async quotes(symbols, {sparkRange = '1d'} = {}) {
         const now = this._now();
         const quotes = symbols.map(symbol => {
             const s = session(symbol, 'day', 78, 300, now);
@@ -123,19 +123,67 @@ export class DemoClient {
                 type: 'MOCK',
                 state: demoState(symbol, now),
                 tz: 'America/New_York', marketTime: now,
-                spark: s.values,
+                spark: sparkRange === '1d'
+                    ? s.values : this._histSpark(symbol, sparkRange, price),
                 open: s.values[0],
             };
         });
         return {at: now, quotes};
     }
 
+    /* multi-day sparkline: the long-range history walk rescaled to end at
+     * today's live price, thinned to ≤40 points */
+    _histSpark(symbol, range, price) {
+        const days = {'7d': 7, '1mo': 30, '52w': 365, ytd: 180,
+                      '1y': 365, '2y': 730, '5y': 1825}[range] ?? 30;
+        const rnd = mulberry32(`${symbol}:hist:${range}:1d`);
+        const out = [];
+        let p = price * (0.6 + rnd() * 0.5);
+        const n = Math.min(40, days);
+        for (let i = 0; i < n; i++) {
+            p *= 1 + (rnd() - 0.485) * 0.02;
+            out.push(p);
+        }
+        const k = price / out[n - 1];
+        return out.map(v => v * k);
+    }
+
+    /* tabloid-lite headlines, deterministic per symbol */
+    async news(symbol) {
+        const now = this._now();
+        const rnd = mulberry32(`${symbol}:news`);
+        const srcs = ['Reuters', 'Bloomberg', 'Barron\u2019s', 'CNBC',
+                      'The Wall Street Journal', 'Investor\u2019s Business Daily'];
+        const heads = [
+            `${symbol} climbs as traders position ahead of earnings`,
+            `Analysts raise ${symbol} price targets on strong guidance`,
+            `Sector rotation lifts ${symbol} in choppy session`,
+            `Insider filings show mixed signals for ${symbol}`,
+            `${symbol}: options market bets on a volatility squeeze`,
+            `Funds trim ${symbol} as flows shift to value names`,
+            `${symbol} holders weigh dividend against buyback math`,
+            `Morning brief: ${symbol}, futures and what movers mean for you`,
+        ];
+        const out = [];
+        for (let i = 0; i < 6; i++) {
+            const h = heads[Math.floor(rnd() * heads.length)];
+            out.push({
+                title: out.some(o => o.title === h) ? `${h} — update` : h,
+                source: srcs[Math.floor(rnd() * srcs.length)],
+                url: `https://finance.yahoo.com/quote/${encodeURIComponent(symbol)}/news`,
+                at: now - (i * 7 + Math.floor(rnd() * 6)) * 3600,
+            });
+        }
+        return out;
+    }
+
     async history(symbol, range = '1d', interval = 'auto') {
         const iv = intervalFor(range, interval);
         const now = this._now();
         const perDay = {'1m': 390, '5m': 78, '15m': 26, '30m': 13, '1h': 7};
-        const days = {'1d': 1, '5d': 5, '1mo': 22, '3mo': 66, '6mo': 130,
-                      ytd: 180, '1y': 252, '5y': 1260, max: 2520}[range] ?? 22;
+        const days = {'1d': 1, '7d': 6, '5d': 5, '1mo': 22, '3mo': 66, '6mo': 130,
+                      ytd: 180, '52w': 252, '1y': 252, '2y': 504,
+                      '5y': 1260, max: 2520}[range] ?? 22;
         const stepSec = {'1m': 60, '5m': 300, '15m': 900, '30m': 1800,
                          '1h': 3600 * 7, '1d': 86400, '1wk': 604800,
                          '1mo': 2592000}[iv] ?? 86400;

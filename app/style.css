@@ -71,3 +71,7 @@ list row { border-radius: 8px; }
 
 /* dialogs */
 .dlg-pad { padding: 18px; }
+
+/* sidebar watchlist rows + news list */
+.tg-row-sym { font-weight: 700; }
+.tg-news-title { font-weight: 600; }

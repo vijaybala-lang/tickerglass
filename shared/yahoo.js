@@ -220,10 +220,20 @@ export class YahooClient {
 
     async history(symbol, range = '1d', interval = 'auto') {
         const iv = intervalFor(range, interval);
-        const url = `https://{{host}}/v8/finance/chart/` +
-            `${encodeURIComponent(symbol)}?range=${range}&interval=${iv}` +
+        const apiRange = range === '52w' ? '1y' : range;
+        const url = r => `https://{{host}}/v8/finance/chart/` +
+            `${encodeURIComponent(symbol)}?range=${r}&interval=${iv}` +
             `&includePrePost=false`;
-        const data = await this._try(`history ${symbol}`, url);
+        let data;
+        try {
+            data = await this._try(`history ${symbol}`, url(apiRange));
+        } catch (e) {
+            // some deployments reject 7d — degrade to the 5-trading-day view
+            if (apiRange === '7d')
+                data = await this._try(`history ${symbol}`, url('5d'));
+            else
+                throw e;
+        }
         const res = data?.chart?.result?.[0];
         if (!res?.meta)
             throw new Error(`history ${symbol}: empty`);
@@ -284,6 +294,25 @@ export class YahooClient {
                 exchange: r.exchDisp ?? r.exchange ?? '',
                 type: r.quoteType ?? '',
                 currency: r.currency ?? '',
+            }));
+    }
+
+    /* ── news ──────────────────────────────────────────────────────────── */
+
+    /** Recent stories for a symbol via the search endpoint (keyless). */
+    async news(symbol) {
+        const url = `https://{{host}}/v1/finance/search?q=` +
+            `${encodeURIComponent(symbol)}&quotesCount=1&newsCount=15` +
+            `&enableFuzzyQuery=false&lang=en-US`;
+        const data = await this._try(`news ${symbol}`, url);
+        return (data?.news ?? [])
+            .filter(n => n.title && n.link)
+            .slice(0, 12)
+            .map(n => ({
+                title: n.title,
+                source: n.publisher ?? '',
+                url: n.link,
+                at: (n.providerPublishTime ?? n.originallyCreated ?? 0) / 1000,
             }));
     }
 }
@@ -367,5 +396,13 @@ export class MarketClient {
 
     search(q) {
         return this._impl.search(q);
+    }
+
+    async news(symbol) {
+        try {
+            return await this._impl.news(symbol);
+        } catch {
+            return [];   // news is garnish — never break the quote flow
+        }
     }
 }

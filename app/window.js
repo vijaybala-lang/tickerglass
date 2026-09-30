@@ -1,6 +1,7 @@
 /* window.js — the whole TickerGlass app UI.
- * Layout: OverlaySplitView(watchlists sidebar | toast overlay(headerbar +
- * hero + cairo chart + range/interval/style controls + ColumnView table)).
+ * Layout: OverlaySplitView(sidebar(watchlist dropdown + sparkline rows) |
+ * toast overlay(headerbar + ViewStack(chart page: hero + cairo chart +
+ * ranges + news | table page: sortable list table))).
  * Everything is driven by the shared gsettings schema; Yahoo/demo comes
  * through the shared MarketClient. */
 
@@ -12,10 +13,10 @@ import Adw from 'gi://Adw';
 import Cairo from 'gi://cairo';
 
 import {MarketClient} from './yahoo.js';
-import {paintChart} from './spark.js';
+import {paintChart, paintMiniSpark} from './spark.js';
 import {textPrompt} from './prompt.js';
 import {parseWatchlists, stringifyWatchlists, fmtPrice, fmtDelta, fmtPct,
-        fmtCompact, fmtTime, monthDay, symbolShort, RANGES, RANGE_LABEL,
+        fmtCompact, fmtTime, axisDate, symbolShort, RANGES, RANGE_LABEL,
         INTERVALS, INTERVAL_LABEL, intervalFor} from './fmt.js';
 
 /* ── table row model: one plain JS object per quote, camelCase fields —
@@ -86,6 +87,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._client = new MarketClient(this._settings.get_string('data-source'));
         this._hist = null;
         this._quotes = [];
+        this._launcher = new Gtk.UriLauncher();
         this._progress = 1;
         this._cursor = null;
         this._busy = false;
@@ -105,6 +107,10 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._rebuildSidebar();
         this._refresh();
         this._restartTimer();
+        // TG_VIEW=table|chart forces the initial view (dev/testing hook)
+        const view0 = GLib.getenv('TG_VIEW');
+        if (view0 === 'table' || view0 === 'chart')
+            this._stack.set_visible_child_name(view0);
     }
 
     /* ── UI construction ──────────────────────────────────────────────── */
@@ -132,6 +138,19 @@ class TickerWindow extends Adw.ApplicationWindow {
         const content = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL});
         content.append(hbar);
 
+        // the window body is a two-page stack: Chart (hero + chart + news)
+        // and Table (the sortable watchlist grid); the header toggles pages
+        const viewBox = new Gtk.Box({css_classes: ['linked']});
+        const chartBtn = new Gtk.ToggleButton({label: 'Chart', tooltip_text: 'Chart view'});
+        const tableBtn = new Gtk.ToggleButton({label: 'Table', tooltip_text: 'Table view'});
+        viewBox.append(chartBtn);
+        viewBox.append(tableBtn);
+        viewBox.set_halign(Gtk.Align.CENTER);
+        hbar.pack_end(viewBox);
+
+        // chart page
+        const chartPage = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL});
+
         // hero block
         this._heroBox = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL,
                                      margin_top: 10, margin_bottom: 2,
@@ -154,7 +173,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._chips = new Adw.WrapBox({margin_top: 4, line_spacing: 8,
                                        child_spacing: 8});
         this._heroBox.append(this._chips);
-        content.append(this._heroBox);
+        chartPage.append(this._heroBox);
 
         // chart
         this._chart = new Gtk.DrawingArea();
@@ -173,7 +192,7 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._chart.queue_draw();
         });
         this._chart.add_controller(hover);
-        content.append(this._chart);
+        chartPage.append(this._chart);
 
         // controls row: range chips + interval + style
         const controls = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
@@ -216,7 +235,36 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._styleBtn.set_menu_model(m);
         }
         controls.append(this._styleBtn);
-        content.append(controls);
+        chartPage.append(controls);
+
+        // news feed for the hero symbol
+        const newsHead = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
+                                      margin_start: 18, margin_top: 6,
+                                      spacing: 8});
+        newsHead.append(new Gtk.Label({label: 'News', css_classes: ['heading'],
+                                       halign: Gtk.Align.START}));
+        this._newsCount = new Gtk.Label({label: '', css_classes: ['dim-label', 'caption']});
+        newsHead.append(this._newsCount);
+        chartPage.append(newsHead);
+        const newsScroll = new Gtk.ScrolledWindow({
+            max_content_height: 230, propagate_natural_height: true,
+            margin_start: 12, margin_end: 12, margin_top: 4, margin_bottom: 6,
+        });
+        newsScroll.add_css_class('card');
+        this._newsList = new Gtk.ListBox();
+        this._newsList.add_css_class('flat');
+        this._newsList.set_header_func((row, before) => {
+            row.set_header(before ? new Gtk.Separator({orientation: Gtk.Orientation.HORIZONTAL}) : null);
+        });
+        this._newsList.connect('row-activated', (l, row) => {
+            if (row?._url)
+                this._openUrl(row._url);
+        });
+        newsScroll.set_child(this._newsList);
+        this._newsEmpty = new Gtk.Label({label: '', css_classes: ['dim-label'],
+                                         margin_top: 12, margin_bottom: 12});
+        this._newsList.set_placeholder(this._newsEmpty);
+        chartPage.append(newsScroll);
 
         /* table — a hand-rolled ListBox + header row. GtkColumnView's
          * introspection is unreliable across distros (its constructor even
@@ -250,7 +298,28 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._tableList.add_controller(rightClick);
         scroller.set_child(this._tableList);
         wrap.append(scroller);
-        content.append(wrap);
+
+        /* —— view stack + header toggles —— */
+        const tablePage = wrap;
+        this._stack = new Gtk.Stack({
+            vexpand: true, transition_type: Gtk.StackTransitionType.SLIDE_LEFT_RIGHT,
+            transition_duration: 180,
+        });
+        this._stack.add_titled(chartPage, 'chart', 'Chart');
+        this._stack.add_titled(tablePage, 'table', 'Table');
+        content.append(this._stack);
+        for (const [btn, page] of [[chartBtn, 'chart'], [tableBtn, 'table']]) {
+            btn.connect('toggled', () => {
+                if (btn.get_active())
+                    this._stack.set_visible_child_name(page);
+            });
+        }
+        chartBtn.set_active(true);
+        this._stack.connect('notify::visible-child-name', () => {
+            const p = this._stack.get_visible_child_name();
+            chartBtn.set_active(p === 'chart');
+            tableBtn.set_active(p === 'table');
+        });
 
         // status line
         this._statusLbl = new Gtk.Label({label: '', css_classes: ['dim-label', 'caption'],
@@ -263,42 +332,79 @@ class TickerWindow extends Adw.ApplicationWindow {
         statusRow.append(this._statusLbl);
         content.append(statusRow);
 
-        /* —— sidebar —— */
+        /* —— sidebar: watchlist chooser + sparkline symbol rows —— */
         const sidebar = new Adw.Bin({css_classes: ['sidebar']});
         const sideBox = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL});
         const sideHead = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
                                       margin_start: 12, margin_end: 6,
-                                      margin_top: 8, margin_bottom: 4,
-                                      spacing: 6});
+                                      margin_top: 8, spacing: 6});
         const sideLbl = new Gtk.Label({label: 'Watchlists',
                                        css_classes: ['heading']});
         sideLbl.set_valign(Gtk.Align.CENTER);
-        sideLbl.set_vexpand(true);
         sideHead.append(sideLbl);
         const newBtn = new Gtk.Button({icon_name: 'list-add-symbolic',
                                        tooltip_text: 'New list (Ctrl+N)'});
         newBtn.add_css_class('flat');
         newBtn.set_action_name('win.newlist');
         newBtn.set_halign(Gtk.Align.END);
+        newBtn.set_hexpand(true);
         newBtn.set_valign(Gtk.Align.CENTER);
-        newBtn.set_vexpand(true);
         sideHead.append(newBtn);
         sideBox.append(sideHead);
 
-        this._wlList = new Gtk.ListBox({vexpand: true});
-        this._wlList.add_css_class('navigation-sidebar');
-        this._wlList.connect('row-selected', (l, row) => {
-            if (row?.wlId && row.wlId !== this._settings.get_string('active-watchlist'))
-                this._settings.set_string('active-watchlist', row.wlId);
+        // dropdown picking the active watchlist (the extension follows live)
+        const chooser = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
+                                     margin_start: 10, margin_end: 10,
+                                     margin_top: 2, spacing: 4});
+        this._wlStrings = new Gtk.StringList();
+        this._wlDrop = new Gtk.DropDown({model: this._wlStrings,
+                                         hexpand: true});
+        this._wlDrop.connect('notify::selected', () => {
+            if (this._suppressWl)
+                return;
+            const lists = this._lists();
+            const wl = lists[this._wlDrop.get_selected()];
+            if (wl && wl.id !== this._settings.get_string('active-watchlist'))
+                this._settings.set_string('active-watchlist', wl.id);
         });
-        const wlScroll = new Gtk.ScrolledWindow({vexpand: true});
-        wlScroll.set_child(this._wlList);
-        sideBox.append(wlScroll);
+        chooser.append(this._wlDrop);
+        const renameBtn = new Gtk.Button({icon_name: 'document-edit-symbolic',
+                                          tooltip_text: 'Rename current list'});
+        renameBtn.add_css_class('flat');
+        renameBtn.connect('clicked', () =>
+            this._renameList(this._settings.get_string('active-watchlist')));
+        chooser.append(renameBtn);
+        const delBtn = new Gtk.Button({icon_name: 'user-trash-symbolic',
+                                       tooltip_text: 'Delete current list'});
+        delBtn.add_css_class('flat');
+        delBtn.connect('clicked', () =>
+            this._deleteList(this._settings.get_string('active-watchlist')));
+        chooser.append(delBtn);
+        sideBox.append(chooser);
+
+        // the watchlist itself: symbol + sparkline + price per row
+        this._symList = new Gtk.ListBox({vexpand: true});
+        this._symList.add_css_class('navigation-sidebar');
+        this._symList.set_selection_mode(Gtk.SelectionMode.SINGLE);
+        this._symList.connect('row-activated', (l, row) => {
+            if (row?._sym)
+                this._selectSymbol(row._sym);
+        });
+        const symClick = new Gtk.GestureClick();
+        symClick.set_button(3);
+        symClick.connect('pressed', (g, nPress, x, y) => {
+            const row = this._symList.get_row_at_y(y);
+            this._showRowMenu(row?._sym, this._symList);
+        });
+        this._symList.add_controller(symClick);
+        const symScroll = new Gtk.ScrolledWindow({vexpand: true});
+        symScroll.set_child(this._symList);
+        sideBox.append(symScroll);
         sidebar.set_child(sideBox);
 
         this._split = new Adw.OverlaySplitView({
             sidebar: sidebar, show_sidebar: this._settings.get_boolean('sidebar-visible'),
-            min_sidebar_width: 210, max_sidebar_width: 320,
+            min_sidebar_width: 240, max_sidebar_width: 360,
         });
         sideBtn.bind_property('active', this._split, 'show_sidebar',
                               GObject.BindingFlags.BIDIRECTIONAL);
@@ -473,59 +579,94 @@ class TickerWindow extends Adw.ApplicationWindow {
     }
 
     _rebuildSidebar() {
-        for (let r = this._wlList.get_first_child(); r;) {
-            const next = r.get_next_sibling();
-            this._wlList.remove(r);
-            r = next;
-        }
         const lists = this._lists();
         const active = this._settings.get_string('active-watchlist');
-        for (const wl of lists) {
-            const row = new Gtk.ListBoxRow({activatable: true});
-            row.wlId = wl.id;
-            const box = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
-                                     spacing: 6, margin_start: 6, margin_end: 2,
-                                     margin_top: 3, margin_bottom: 3});
-            const name = new Gtk.Label({label: wl.name, ellipsize: 3,
-                                        xalign: 0, hexpand: true});
-            box.append(name);
-            const cnt = new Gtk.Label({label: String(wl.symbols.length),
-                                       css_classes: ['dim-label', 'caption']});
-            box.append(cnt);
-            const gear = new Gtk.MenuButton({
-                icon_name: 'view-more-symbolic',
-                primary: true,
-            });
-            gear.add_css_class('flat');
-            gear.add_css_class('small-button');
-            const gm = new Gio.Menu();
-            gm.append('Add symbol…', 'win.search');
-            const listOps = new Gio.Menu();
-            listOps.append('Rename list…', `win.renameList::${wl.id}`);
-            if (lists.length > 1)
-                listOps.append('Delete list', `win.deleteList::${wl.id}`);
-            gm.append_section(null, listOps);
-            gear.set_menu_model(gm);
-            box.append(gear);
-            row.set_child(box);
-            this._wlList.append(row);
+
+        // dropdown: "Name · N" per list
+        this._suppressWl = true;
+        while (this._wlStrings.get_n_items())
+            this._wlStrings.remove(this._wlStrings.get_n_items() - 1);
+        let activeIx = 0;
+        lists.forEach((wl, i) => {
+            this._wlStrings.append(`${wl.name}  ·  ${wl.symbols.length}`);
             if (wl.id === active)
-                this._wlList.select_row(row);
+                activeIx = i;
+        });
+        this._wlDrop.set_selected(activeIx);
+        this._suppressWl = false;
+
+        // symbol rows: sym · sparkline · price/%
+        for (let r = this._symList.get_first_child(); r;) {
+            const next = r.get_next_sibling();
+            this._symList.remove(r);
+            r = next;
         }
-        if (!this._renameAction) {
-            const rn = new Gio.SimpleAction({
-                name: 'renameList', parameter_type: new GLib.VariantType('s'),
+        this._symRows = {};
+        const wl = this._activeList();
+        for (const sym of wl?.symbols ?? []) {
+            const row = new Gtk.ListBoxRow();
+            row._sym = sym;
+            const box = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
+                                     spacing: 8, margin_start: 10,
+                                     margin_end: 10, margin_top: 5,
+                                     margin_bottom: 5});
+            const symL = new Gtk.Label({label: sym, ellipsize: 3, xalign: 0});
+            symL.add_css_class('tg-row-sym');
+            symL.set_max_width_chars(10);
+            box.append(symL);
+            const spark = new Gtk.DrawingArea({content_width: 56,
+                                               content_height: 22});
+            spark.set_hexpand(true);
+            spark.set_valign(Gtk.Align.CENTER);
+            spark.set_draw_func((area, cr, w, h) => {
+                const q = this._quoteOf(row._sym);
+                if (!q?.spark || q.spark.length < 2)
+                    return;
+                paintMiniSpark(cr, {w, h, values: q.spark,
+                                    up: (q.change ?? 0) >= 0});
             });
-            rn.connect('activate', (a, v) => this._renameList(v.get_string()[0]));
-            this.add_action(rn);
-            const dl = new Gio.SimpleAction({
-                name: 'deleteList', parameter_type: new GLib.VariantType('s'),
-            });
-            dl.connect('activate', (a, v) => this._deleteList(v.get_string()[0]));
-            this.add_action(dl);
-            this._renameAction = rn;
+            box.append(spark);
+            const priceL = new Gtk.Label({label: '—', css_classes: ['numeric']});
+            const pctL = new Gtk.Label({label: '', css_classes: ['caption', 'numeric'],
+                                        halign: Gtk.Align.END});
+            const praw = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL,
+                                      spacing: 0});
+            praw.append(priceL);
+            praw.append(pctL);
+            box.append(praw);
+            row.set_child(box);
+            row._priceL = priceL;
+            row._pctL = pctL;
+            row._spark = spark;
+            this._symList.append(row);
+            this._symRows[sym] = row;
         }
+        this._updateWatchRows();
         this._title.set_title(this._activeList()?.name ?? 'TickerGlass');
+    }
+
+    _quoteOf(sym) {
+        return this._quotes.find(x => x.symbol === sym);
+    }
+
+    /* push fresh quote data into the sidebar rows (labels + sparklines) */
+    _updateWatchRows() {
+        if (!this._symRows)
+            return;
+        for (const [sym, row] of Object.entries(this._symRows)) {
+            const q = this._quoteOf(sym);
+            row._priceL.set_text(q?.price != null
+                ? fmtPrice(q.price, q.currency) : '—');
+            row._pctL.set_text(q?.changePct != null ? fmtPct(q.changePct) : '');
+            row._pctL.remove_css_class('tg-up');
+            row._pctL.remove_css_class('tg-down');
+            if (q?.change != null)
+                row._pctL.add_css_class(q.change >= 0 ? 'tg-up' : 'tg-down');
+            row._spark.queue_draw();
+        }
+        const heroRow = this._symRows[this._hero()];
+        if (heroRow)
+            this._symList.select_row(heroRow);
     }
 
     _newListDialog() {
@@ -742,7 +883,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._syncColumnMenuState();
     }
 
-    _showRowMenu(sym) {
+    _showRowMenu(sym, parent) {
         const symbol = sym ?? this._hero();
         if (!symbol)
             return;
@@ -751,7 +892,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         m.append('Copy symbol', `win.copy::${symbol}`);
         m.append('Remove from watchlist', `win.removeSymbol::${symbol}`);
         const pop = Gtk.PopoverMenu.new_from_model(m);
-        pop.set_parent(this._tableList);
+        pop.set_parent(parent ?? this._tableList);
         pop.present();
     }
 
@@ -816,6 +957,8 @@ class TickerWindow extends Adw.ApplicationWindow {
     }
 
     _selectSymbol(sym) {
+        // clicking a row anywhere jumps to the full history view
+        this._stack?.set_visible_child_name('chart');
         this._settings.set_string('selected-symbol', sym);
     }
 
@@ -837,7 +980,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         }
         this._busy = true;
         this._spinner.set_visible(true);
-        this._client.quotes(syms)
+        this._client.quotes(syms, {sparkRange: '1mo'})
             .then(res => {
                 if (this._dead)
                     return;
@@ -846,6 +989,7 @@ class TickerWindow extends Adw.ApplicationWindow {
                 this._busy = false;
                 this._spinner.set_visible(false);
                 this._refreshTable();
+                this._updateWatchRows();
                 this._updateHero();
                 // pull the hero's chart as soon as quotes land (don't wait
                 // for the next refresh tick to paint something)
@@ -893,6 +1037,55 @@ class TickerWindow extends Adw.ApplicationWindow {
         }
     }
 
+    /* ── news ─────────────────────────────────────────────────────────── */
+
+    async _loadNews(sym) {
+        const list = this._newsList;
+        if (!list)
+            return;
+        for (let r = list.get_first_child(); r;) {
+            const next = r.get_next_sibling();
+            list.remove(r);
+            r = next;
+        }
+        this._newsCount.set_text('');
+        this._newsEmpty.set_text(sym ? `Loading news for ${sym}…` : '');
+        const items = sym ? await this._client.news(sym) : [];
+        if (this._dead || this._newsFor !== sym)
+            return;
+        this._newsCount.set_text(items.length ? `· ${items.length}` : '');
+        this._newsEmpty.set_text(sym ? `No recent news for ${sym}` : '');
+        for (const n of items) {
+            const row = new Gtk.ListBoxRow();
+            row._url = n.url;
+            const box = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL,
+                                     spacing: 2, margin_start: 12,
+                                     margin_end: 12, margin_top: 8,
+                                     margin_bottom: 8});
+            const title = new Gtk.Label({label: n.title, xalign: 0,
+                                         wrap: true, ellipsize: 3});
+            title.set_lines(2);
+            title.add_css_class('tg-news-title');
+            box.append(title);
+            const sub = new Gtk.Label({
+                label: [n.source, relTime(n.at)].filter(Boolean).join('  ·  '),
+                xalign: 0, css_classes: ['dim-label', 'caption']});
+            box.append(sub);
+            row.set_child(box);
+            list.append(row);
+        }
+    }
+
+    _openUrl(url) {
+        try {
+            const p = this._launcher.launch(url, this);
+            if (p?.catch)
+                p.catch(() => this._toast('Couldn’t open link'));
+        } catch {
+            this._toast(`Couldn’t open ${url}`);
+        }
+    }
+
     _startDrawIn() {
         if (this._morphId)
             GLib.source_remove(this._morphId);
@@ -929,7 +1122,8 @@ class TickerWindow extends Adw.ApplicationWindow {
             prevClose: hist.range === '1d' ? hist.meta.prevClose : null,
             dark: this._styleManager?.get_dark() ?? true,
             fmtY: v => fmtPrice(v, hist.meta.currency),
-            fmtX: t => intraday ? fmtTime(t, hist.meta.tz) : monthDay(t),
+            fmtX: t => intraday ? fmtTime(t, hist.meta.tz)
+                                : axisDate(t, (hist.points[hist.points.length - 1].t - hist.points[0].t) / 86400),
             progress: this._progress,
             cursor: this._cursor,
         });
@@ -942,6 +1136,10 @@ class TickerWindow extends Adw.ApplicationWindow {
         const hist = this._hist;
         this._title.set_title(this._activeList()?.name ?? 'TickerGlass');
         this._title.set_subtitle(sym ?? '');
+        if (sym !== this._newsFor) {
+            this._newsFor = sym;
+            this._loadNews(sym);
+        }
         for (const [r, b] of Object.entries(this._rangeChips)) {
             b.set_css_classes(r === this._settings.get_string('chart-range')
                 ? ['tg-chip', 'tg-chip-active'] : ['tg-chip']);
@@ -1198,6 +1396,19 @@ class TickerWindow extends Adw.ApplicationWindow {
 );
 
 /* ── module-level helpers ─────────────────────────────────────────────── */
+
+/* "3h ago" for news stamps */
+function relTime(epochSec) {
+    if (!epochSec)
+        return '';
+    const m = Math.max(0, Math.round((GLib.get_real_time() / 1e6 - epochSec) / 60));
+    if (m < 60)
+        return `${m}m ago`;
+    const h = Math.round(m / 60);
+    if (h < 24)
+        return `${h}h ago`;
+    return `${Math.round(h / 24)}d ago`;
+}
 
 function renderChips(wrap, entries) {
     for (let c = wrap.get_first_child(); c;) {

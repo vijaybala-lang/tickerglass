@@ -12,12 +12,12 @@ import Cairo from 'gi://cairo';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {paintChart, paintMiniSpark} from './spark.js';
-import {fmtPrice, fmtDelta, fmtPct, fmtCompact, fmtTime, monthDay,
+import {fmtPrice, fmtDelta, fmtPct, fmtCompact, fmtTime, axisDate,
         symbolShort, RANGE_LABEL, COLORS} from './fmt.js';
 import {_, N_} from './i18n.js';
 
-const RANGES = ['1d', '5d', '1mo', '6mo', '1y'];
-const INTRADAY = new Set(['1d', '5d']);
+const RANGES = ['1d', '7d', '1mo', '52w', 'ytd', '1y'];
+const INTRADAY = new Set(['1d']);
 const CHART_H = 150;
 
 const label = (text, cls) => new St.Label({
@@ -82,7 +82,8 @@ class ChartArea extends St.DrawingArea {
             prevClose: hist.range === '1d' ? hist.meta.prevClose : null,
             dark: p._dark,
             fmtY: v => fmtPrice(v, hist.meta.currency),
-            fmtX: t => intraday ? fmtTime(t, hist.meta.tz) : monthDay(t),
+            fmtX: t => intraday ? fmtTime(t, hist.meta.tz)
+                                : axisDate(t, (hist.points[hist.points.length - 1].t - hist.points[0].t) / 86400),
             progress: this._progress,
         });
     }

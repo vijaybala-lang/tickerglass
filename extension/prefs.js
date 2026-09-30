@@ -290,7 +290,11 @@ export default class TickerGlassPrefs extends ExtensionPreferences {
         g2.add(styleRow);
 
         const rangeRow = new Adw.ComboRow({title: _('Default range')});
-        rangeRow.model = new Gtk.StringList({strings: RANGES.map(r => RANGE_LABEL[r])});
+        // this GtkStringList build rejects the {strings:} construct dict
+        const rangeModel = new Gtk.StringList();
+        for (const r of RANGES)
+            rangeModel.append(RANGE_LABEL[r]);
+        rangeRow.model = rangeModel;
         rangeRow.selected = Math.max(0, RANGES.indexOf(
             settings.get_string('chart-range')));
         rangeRow.connect('notify::selected', () =>

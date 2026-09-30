@@ -16,11 +16,11 @@ export const COLORS = {
 
 /* ── ranges & intervals ─────────────────────────────────────────────────── */
 
-export const RANGES = ['1d', '5d', '1mo', '3mo', '6mo', 'ytd', '1y', '5y', 'max'];
+export const RANGES = ['1d', '7d', '1mo', '52w', 'ytd', '1y', '2y', '5y'];
 
 export const RANGE_LABEL = {
-    '1d': '1D', '5d': '5D', '1mo': '1M', '3mo': '3M', '6mo': '6M',
-    ytd: 'YTD', '1y': '1Y', '5y': '5Y', max: 'MAX',
+    '1d': '1D', '7d': '7D', '1mo': '1M', '52w': '52W',
+    ytd: 'YTD', '1y': '1Y', '2y': '2Y', '5y': '5Y',
 };
 
 /* Yahoo's own validity limits per interval (approximated conservatively). */
@@ -32,8 +32,10 @@ const INTERVAL_MAX_DAYS = {
 export const INTERVALS = Object.keys(INTERVAL_MAX_DAYS);
 
 const RANGE_DAYS = {
-    '1d': 1, '5d': 5, '1mo': 30, '3mo': 91, '6mo': 182,
-    ytd: 300, '1y': 365, '5y': 1825, max: 36500,
+    '1d': 1, '7d': 7, '1mo': 30, '52w': 365, ytd: 300,
+    '1y': 365, '2y': 730, '5y': 1825,
+    /* legacy values that may still live in user dconf */
+    '5d': 5, '3mo': 91, '6mo': 182, max: 36500,
 };
 
 export const INTERVAL_LABEL = {
@@ -141,6 +143,18 @@ export function monthDay(epochSec) {
     try {
         return new Intl.DateTimeFormat(undefined,
             {month: 'short', day: 'numeric'}).format(new Date(epochSec * 1000));
+    } catch {
+        return '';
+    }
+}
+
+/** x-axis date label; adds ’YY once the span exceeds about a year, so
+ *  2Y/5Y charts read chronologically instead of shuffling month-days. */
+export function axisDate(epochSec, spanDays) {
+    try {
+        return new Intl.DateTimeFormat(undefined,
+            {month: 'short', day: 'numeric',
+             ...(spanDays > 400 ? {year: '2-digit'} : {})}).format(new Date(epochSec * 1000));
     } catch {
         return '';
     }

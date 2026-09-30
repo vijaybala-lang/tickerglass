@@ -73,7 +73,7 @@
     <key name="chart-range" type="s">
       <default>'1d'</default>
       <summary>Chart range</summary>
-      <description>1d 5d 1mo 3mo 6mo ytd 1y 5y max</description>
+      <description>1d 7d 1mo 52w ytd 1y 2y 5y</description>
     </key>
     <key name="chart-interval" type="s">
       <default>'auto'</default>

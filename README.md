@@ -8,10 +8,16 @@ watchlist in one, the other follows instantly.
 
 - **Any Yahoo symbol**: stocks, ETFs, indices (`^GSPC`), FX (`EURUSD=X`),
   crypto (`BTC-USD`), futures (`GC=F`) — search-add from both app and card
-- **Charts that flex**: ranges 1D → MAX with interval picker and area /
-  line / candle styles, hover crosshair, price axis, prev-close line
+- **Two-pane app**: a watchlist dropdown and live sparkline rows on the
+  left; click a symbol for the full history view on the right
+  (or flip to the sortable table view)
+- **Charts that flex**: 1D · 7D · 1M · 52W · YTD · 1Y · 2Y · 5Y ranges with
+  interval picker and area / line / candle styles, hover crosshair,
+  price axis, prev-close line
+- **News**: recent Yahoo Finance stories for the selected symbol, one
+  click to open in your browser
 - **Watchlists & columns**: unlimited named lists, 11 table columns you can
-  show/hide and sort by (click the headers in the app)
+  show/hide and sort by (click the headers in the table view)
 - **Live sync**: one gsettings schema (`org.gnome.shell.extensions.tickerglass`)
   drives both the extension and the app; changes apply while open
 - **Two data sources**: Yahoo Finance (keyless endpoints, host rotation and
@@ -20,6 +26,8 @@ watchlist in one, the other follows instantly.
 - Panel modes: sparkline / ticker / price; market-hours-aware refresh;
   HiDPI-aware cairo painting (~20 fps, pauses when the menu is closed)
 - GNOME Shell **50** (ES modules), GTK 4 + libadwaita app under plain `gjs`
+
+![TickerGlass: sparkline watchlist sidebar, chart with news feed](screenshot.png)
 
 ## Install
 
@@ -73,7 +81,7 @@ gsettings set org.gnome.shell.extensions.tickerglass data-source demo
 | `extension/menu.js` | the dropdown card (hero, chart, ranges, rows) |
 | `extension/prefs.js` | Adw preferences window (watchlist editor included) |
 | `app/main.js` | `Adw.Application` launcher |
-| `app/window.js` | the whole window: sidebar, hero, chart, table, dialogs |
+| `app/window.js` | the whole window: watchlist dropdown + sparkline rows, hero, chart, news, table view, dialogs |
 | `schemas/…gschema.xml` | the settings contract both halves share |
 | `tools/build.sh` | assembles `dist/extension` + `dist/app` (copies `shared/`) |
 | `tools/preview.mjs` | renders every painter to PNG outside the shell |
