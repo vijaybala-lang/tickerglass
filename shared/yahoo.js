@@ -14,9 +14,22 @@
  * stays on screen meanwhile. */
 
 import GLib from 'gi://GLib';
-import Soup from 'gi://Soup';
+import Soup from 'gi://Soup?version=3.0';
 import {intervalFor} from './fmt.js';
 import {DemoClient} from './mock.js';
+
+/* Read a message's HTTP code defensively: some distro builds ship a
+ * Soup-3.0 typelib whose get_status() return is annotated as the Status
+ * *enum*, which throws for codes it doesn't list (429 among them). The
+ * exception message leaks the number, so recover it from there. */
+function httpStatus(msg) {
+    try {
+        return msg.get_status();
+    } catch (e) {
+        const m = /(\d{3}) is not a valid value/.exec(String(e?.message ?? e));
+        return m ? +m[1] : 0;
+    }
+}
 
 const HOSTS = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com'];
 
@@ -86,7 +99,7 @@ export class YahooClient {
                 try {
                     const bytes = sess.send_and_read_finish(res);
                     body = bytes ? new TextDecoder().decode(bytes.get_data()) : '';
-                    const st = msg.get_status();
+                    const st = httpStatus(msg);
                     if (st === 429)
                         throw new HttpError(429, body);
                     if (st >= 400)
@@ -115,6 +128,20 @@ export class YahooClient {
                 this._penalty.set(host,
                     GLib.get_monotonic_time() / 1e6 + secs);
                 log(`TickerGlass: ${label} rate-limited, backing off ${secs}s`);
+                // some deployments gate with 429 rather than 401 — bootstrap
+                // cookies once and give the same call one crumb-bearing try
+                if (this._crumb === null && !target.includes('crumb=')) {
+                    const crumb = await this._bootstrapCrumb();
+                    if (crumb) {
+                        const withCrumb = target +
+                            `&crumb=${encodeURIComponent(crumb)}`;
+                        try {
+                            const r2 = await this._get(withCrumb, opts);
+                            this._noteSuccess();
+                            return r2;
+                        } catch { /* fall through */ }
+                    }
+                }
             }
             throw e;
         }
@@ -145,7 +172,9 @@ export class YahooClient {
                         }
                     });
             });
-            if (crumb && !/^\s*</.test(crumb) && crumb.length < 32) {
+            // crumbs look like "a1B2+c3d4e5f6=" — reject error bodies that
+            // would otherwise masquerade as crumbs (e.g. "Too Many Requests")
+            if (crumb && /^[A-Za-z0-9+/=._-]{8,24}$/.test(crumb)) {
                 this._crumb = crumb;
                 return crumb;
             }
