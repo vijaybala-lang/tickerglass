@@ -111,6 +111,10 @@ class TickerWindow extends Adw.ApplicationWindow {
         const view0 = GLib.getenv('TG_VIEW');
         if (view0 === 'table' || view0 === 'chart')
             this._stack.set_visible_child_name(view0);
+        // TG_READER_URL opens the news reader at startup (dev/testing hook)
+        const reader0 = GLib.getenv('TG_READER_URL');
+        if (reader0)
+            this._openReader(reader0, 'Reader smoke test');
     }
 
     /* ── UI construction ──────────────────────────────────────────────── */
@@ -258,7 +262,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         });
         this._newsList.connect('row-activated', (l, row) => {
             if (row?._url)
-                this._openUrl(row._url);
+                this._openReader(row._url, row._title);
         });
         newsScroll.set_child(this._newsList);
         this._newsEmpty = new Gtk.Label({label: '', css_classes: ['dim-label'],
@@ -426,6 +430,7 @@ class TickerWindow extends Adw.ApplicationWindow {
 
         const src = new Gio.Menu();
         src.append('Yahoo Finance', 'win.source::yahoo');
+        src.append('Yahoo via relay', 'win.source::yahoo-relay');
         src.append('Demo (offline)', 'win.source::demo');
         menu.append_section('Data source', src);
 
@@ -1058,6 +1063,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         for (const n of items) {
             const row = new Gtk.ListBoxRow();
             row._url = n.url;
+            row._title = n.title;
             const box = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL,
                                      spacing: 2, margin_start: 12,
                                      margin_end: 12, margin_top: 8,
@@ -1084,6 +1090,87 @@ class TickerWindow extends Adw.ApplicationWindow {
         } catch {
             this._toast(`Couldn’t open ${url}`);
         }
+    }
+
+    /* news reader: in-app WebKit window; falls back to the system browser
+     * when webkitgtk isn't installed on the host */
+    async _openReader(url, title) {
+        try {
+            await this._openReaderInner(url, title);
+        } catch (e) {
+            logError(e, 'TickerGlass news reader');
+            this._openUrl(url);
+        }
+    }
+
+    async _openReaderInner(url, title) {
+        let WebKit = null;
+        // dynamic gi imports land on .default; try newest WebKitGTK first
+        for (const v of ['6.0', '5.0', '4.1']) {
+            try {
+                const mod = await import(`gi://WebKit?version=${v}`);
+                WebKit = mod.default ?? mod;
+                if (WebKit?.WebView)
+                    break;
+                WebKit = null;
+            } catch { /* next */ }
+        }
+        if (!WebKit) {
+            this._openUrl(url);
+            return;
+        }
+        if (!this._readerWin) {
+            const win = new Adw.Window({
+                transient_for: this,
+                title: title ?? 'Story',
+                default_width: 900,
+                default_height: 700,
+            });
+            const box = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL});
+            const hbar = new Adw.HeaderBar();
+            const back = new Gtk.Button({icon_name: 'go-previous-symbolic',
+                                         sensitive: false, css_classes: ['flat']});
+            const ext = new Gtk.Button({icon_name: 'web-browser-symbolic',
+                                        tooltip_text: 'Open in browser'});
+            ext.add_css_class('flat');
+            const close = new Gtk.Button({icon_name: 'window-close-symbolic',
+                                          tooltip_text: 'Close'});
+            close.add_css_class('flat');
+            hbar.pack_start(back);
+            hbar.pack_end(close);
+            hbar.pack_end(ext);
+            const web = new WebKit.WebView();
+            web.set_vexpand(true);
+            back.connect('clicked', () => web.go_back());
+            // this WebKit build lacks can-go-back + item.get_back_list —
+            // track the first committed URI ourselves for back sensitivity
+            const first = {uri: null};
+            web.connect('notify::uri', () => {
+                const u = web.get_uri();
+                if (u && first.uri === null)
+                    first.uri = u;
+                back.set_sensitive(!!u && u !== first.uri);
+            });
+            web.connect('notify::title', () => {
+                const t = web.get_title();
+                if (t)
+                    win.set_title(t);
+            });
+            ext.connect('clicked', () => this._openUrl(web.get_uri() ?? url));
+            close.connect('clicked', () => win.destroy());
+            win.connect('destroy', () => {
+                this._readerWin = null;
+                this._readerWeb = null;
+            });
+            box.append(hbar);
+            box.append(web);
+            win.set_content(box);
+            this._readerWin = win;
+            this._readerWeb = web;
+        }
+        this._readerWeb.load_uri(url);
+        this._readerWin.set_title(title ?? 'Story');
+        this._readerWin.present();
     }
 
     _startDrawIn() {
@@ -1247,9 +1334,11 @@ class TickerWindow extends Adw.ApplicationWindow {
         const g = new Adw.PreferencesGroup({title: 'Behaviour'});
         const src = new Adw.ComboRow({
             title: 'Data source',
-            model: new Gtk.StringList({strings: ['Yahoo Finance', 'Demo (offline)']}),
+            model: new Gtk.StringList({strings: ['Yahoo Finance',
+                                                 'Yahoo via relay',
+                                                 'Demo (offline)']}),
         });
-        const srcIds = ['yahoo', 'demo'];
+        const srcIds = ['yahoo', 'yahoo-relay', 'demo'];
         src.set_selected(Math.max(0, srcIds.indexOf(
             this._settings.get_string('data-source'))));
         src.connect('notify::selected', () => this._settings.set_string(
@@ -1397,11 +1486,15 @@ class TickerWindow extends Adw.ApplicationWindow {
 
 /* ── module-level helpers ─────────────────────────────────────────────── */
 
-/* "3h ago" for news stamps */
+/* "3h ago" for news stamps; older items fall back to a date */
 function relTime(epochSec) {
     if (!epochSec)
         return '';
-    const m = Math.max(0, Math.round((GLib.get_real_time() / 1e6 - epochSec) / 60));
+    const days = (GLib.get_real_time() / 1e6 - epochSec) / 86400;
+    if (days > 30)
+        return new Intl.DateTimeFormat(undefined,
+            {month: 'short', day: 'numeric'}).format(new Date(epochSec * 1000));
+    const m = Math.max(0, Math.round(days * 1440));
     if (m < 60)
         return `${m}m ago`;
     const h = Math.round(m / 60);

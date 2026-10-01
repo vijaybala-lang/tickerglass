@@ -259,9 +259,10 @@ export default class TickerGlassPrefs extends ExtensionPreferences {
             subtitle: _('Yahoo Finance needs no account; demo generates ' +
                         'plausible offline data'),
             model: new Gtk.StringList({
-                strings: ['Yahoo Finance', _('Demo (offline)')]}),
+                strings: ['Yahoo Finance', _('Yahoo via relay'),
+                          _('Demo (offline)')]}),
         });
-        const srcIds = ['yahoo', 'demo'];
+        const srcIds = ['yahoo', 'yahoo-relay', 'demo'];
         srcRow.selected = Math.max(0, srcIds.indexOf(
             settings.get_string('data-source')));
         srcRow.connect('notify::selected', () =>

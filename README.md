@@ -56,16 +56,24 @@ rm -f ~/.local/share/applications/dev.vijaybala.TickerGlass.desktop
 
 ## Data sources
 
-`data-source=yahoo` talks to Yahoo's keyless `query*.finance.yahoo.com`
-endpoints — no API key, but those endpoints rate-limit hard by IP (HTTP
-429). The client rotates hosts, bootstraps a cookie+crumb pair and backs
-off exponentially, so it settles down on most residential networks. If your
-network is blocked (or you're offline), `data-source=demo` paints the same
-UI from a deterministic pseudo-market — every chart ends exactly at the
-quote price, so screenshots and tests stay honest:
+Three settings for `data-source`:
+
+- **`yahoo`** — talks to Yahoo's keyless `query*.finance.yahoo.com`
+  endpoints directly. No API key, but these endpoints rate-limit hard by
+  IP (HTTP 429), and CGNAT / shared-pool egress is often throttled
+  preemptively. The client rotates hosts, bootstraps a cookie+crumb pair
+  and backs off exponentially.
+- **`yahoo-relay`** — the same requests, routed through a public fetch
+  relay (`r.jina.ai`) whose egress IP Yahoo trusts. One hop slower per
+  request (a few seconds) but works from networks Yahoo won't serve at
+  all — pick this from the menu / Preferences if plain Yahoo only ever
+  says "Rate limited".
+- **`demo`** — a deterministic pseudo-market that paints the same UI
+  offline; every chart ends exactly at the quote price, so screenshots
+  and tests stay honest:
 
 ```sh
-gsettings set org.gnome.shell.extensions.tickerglass data-source demo
+gsettings set org.gnome.shell.extensions.tickerglass data-source yahoo-relay
 ```
 
 ## Layout

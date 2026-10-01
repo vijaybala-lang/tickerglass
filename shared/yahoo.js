@@ -33,6 +33,12 @@ function httpStatus(msg) {
 
 const HOSTS = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com'];
 
+/* Optional fetch relay (public reader proxy). When Yahoo's edge distrusts
+ * our egress IP (HTTP 429 land — CGNAT pools), the same well-formed
+ * request through a clean fetcher's IP passes. 'yahoo-relay' data-source
+ * routes every Yahoo call through this prefix. */
+export const RELAY = 'https://r.jina.ai/';
+
 /* Browser-ish UA: Yahoo serves the same 429 to python-yfinance-style agents,
  * but a normal Firefox UA gets through far more reliably. */
 const UA = 'Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0';
@@ -51,6 +57,11 @@ export class YahooClient {
         this._crumb = null;                 // string | null (null = not bootstrapped)
         this._penalty = new Map();          // host → monotonic-sec until penalised
         this._consecFail = 0;
+        this._relay = null;                 // null | relay prefix (see RELAY)
+    }
+
+    setRelay(prefix) {
+        this._relay = prefix || null;
     }
 
     /** Seconds until we may hit the network again (0 = now). */
@@ -84,8 +95,14 @@ export class YahooClient {
 
     _get(url, {json = true} = {}) {
         return new Promise((resolve, reject) => {
-            const session = new Soup.Session({user_agent: UA, timeout: 15});
-            const msg = Soup.Message.new('GET', url);
+            // relays 403 browser-spoofing UAs from non-browsers — announce
+            // ourselves honestly there; keep the Firefox one for Yahoo direct
+            const ua = this._relay
+                ? 'TickerGlass/1.0 (GNOME; tickerglass@vijaybala.dev)'
+                : UA;
+            const session = new Soup.Session({user_agent: ua, timeout: 30});
+            const msg = Soup.Message.new('GET',
+                this._relay ? this._relay + url : url);
             if (!msg) {
                 reject(new Error(`bad url: ${url}`));
                 return;
@@ -93,6 +110,8 @@ export class YahooClient {
             msg.request_headers.append('Accept',
                 json ? 'application/json,text/plain,*/*' : 'text/plain,*/*');
             msg.request_headers.append('Accept-Language', 'en-US,en;q=0.5');
+            if (this._relay)
+                msg.request_headers.append('X-Return-Format', 'text');
             session.send_and_read_async(msg, GLib.PRIORITY_DEFAULT, null,
                                         (sess, res) => {
                 let body = '';
@@ -104,6 +123,14 @@ export class YahooClient {
                         throw new HttpError(429, body);
                     if (st >= 400)
                         throw new HttpError(st, body);
+                    // defensive: if a relay ever wraps its answer in reader
+                    // chrome, cut to the payload
+                    if (json && body && body[0] !== '{' && body[0] !== '[') {
+                        const cut = Math.max(
+                            body.indexOf('{'), body.indexOf('['));
+                        if (cut > 0)
+                            body = body.slice(cut);
+                    }
                     resolve(json ? JSON.parse(body) : body);
                 } catch (e) {
                     reject(e instanceof HttpError ? e
@@ -130,7 +157,8 @@ export class YahooClient {
                 log(`TickerGlass: ${label} rate-limited, backing off ${secs}s`);
                 // some deployments gate with 429 rather than 401 — bootstrap
                 // cookies once and give the same call one crumb-bearing try
-                if (this._crumb === null && !target.includes('crumb=')) {
+                if (this._crumb === null && !this._relay &&
+                    !target.includes('crumb=')) {
                     const crumb = await this._bootstrapCrumb();
                     if (crumb) {
                         const withCrumb = target +
@@ -189,7 +217,8 @@ export class YahooClient {
 
     /** Batched spark endpoint: quotes + inline day series in ONE request. */
     async _quotesSpark(symbols, sparkRange) {
-        const iv = sparkRange === '5d' ? '1h' : '15m';
+        const iv = sparkRange === '1d' ? '15m'
+            : sparkRange === '5d' ? '1h' : '1d';
         const url = `https://{{host}}/v7/finance/spark?symbols=` +
             `${encodeURIComponent(symbols.join(','))}` +
             `&range=${sparkRange}&interval=${iv}` +
@@ -226,7 +255,8 @@ export class YahooClient {
         try {
             parts = await this._quotesSpark(symbols, sparkRange);
         } catch (e) {
-            if (/HTTP 4(01|03|04)/.test(e.message) && this._crumb === null) {
+            if (/HTTP 4(01|03|04)/.test(e.message) && this._crumb === null &&
+                !this._relay) {
                 await this._bootstrapCrumb();
                 try {
                     parts = await this._quotesSpark(symbols, sparkRange);
@@ -337,12 +367,17 @@ export class YahooClient {
         return (data?.news ?? [])
             .filter(n => n.title && n.link)
             .slice(0, 12)
-            .map(n => ({
-                title: n.title,
-                source: n.publisher ?? '',
-                url: n.link,
-                at: (n.providerPublishTime ?? n.originallyCreated ?? 0) / 1000,
-            }));
+            .map(n => {
+                // providerPublishTime is epoch seconds in practice, but some
+                // variants send milliseconds — normalize both
+                const t = n.providerPublishTime ?? n.originallyCreated ?? 0;
+                return {
+                    title: n.title,
+                    source: n.publisher ?? '',
+                    url: n.link,
+                    at: t > 1e12 ? t / 1000 : t,
+                };
+            });
     }
 }
 
@@ -404,6 +439,9 @@ export class MarketClient {
     }
 
     setSource(source) {
+        // 'yahoo-relay' = same Yahoo API, fetched through a public reader
+        // proxy (clean IP) when our own egress gets blanket-429'd
+        this._yahoo.setRelay(source === 'yahoo-relay' ? RELAY : null);
         this.source = source === 'demo' ? 'demo' : 'yahoo';
     }
 
