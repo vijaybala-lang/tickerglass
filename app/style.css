@@ -85,17 +85,18 @@ window { font-family: Inter, Cantarell, sans-serif; }
 .tg-add:active { background: alpha(@success-color, 0.65); }
 .tg-add image, .tg-add label { color: inherit; }
 
-/* reorder mode: compact row buttons, quiet green tint on edit rows */
-.tg-edit-btn {
-  min-height: 0;
-  min-width: 0;
-  padding: 1px 7px;
-  font-weight: 700;
-}
-.tg-row-edit {
-  background: alpha(@success-color, 0.07);
+/* swipe-to-delete: the red ✕ pushed into the row's end */
+.tg-del-reveal {
+  background: #f5455c;
+  color: #ffffff;
+  border: none;
   border-radius: 8px;
+  font-weight: 700;
+  padding: 0;
+  min-width: 0;
+  min-height: 0;
 }
+.tg-del-reveal:hover { background: alpha(#f5455c, 0.85); }
 
 /* chart card */
 .tg-chart-area { border-radius: 16px; }

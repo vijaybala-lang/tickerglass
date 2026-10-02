@@ -9,12 +9,16 @@ import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
 import Gtk from 'gi://Gtk?version=4.0';
+import Gdk from 'gi://Gdk?version=4.0';
 import Adw from 'gi://Adw';
 import Cairo from 'gi://cairo';
 
 import {MarketClient} from './yahoo.js';
 import {paintChart, paintMiniSpark} from './spark.js';
 import {textPrompt} from './prompt.js';
+
+/* width (px) of the swipe-revealed delete button */
+const TG_DEL_W = 44;
 import {parseWatchlists, stringifyWatchlists, fmtPrice, fmtDelta, fmtPct,
         fmtCompact, fmtTime, axisDate, symbolShort, RANGES, RANGE_LABEL,
         INTERVALS, INTERVAL_LABEL, intervalFor} from './fmt.js';
@@ -135,9 +139,6 @@ class TickerWindow extends Adw.ApplicationWindow {
         const reader0 = GLib.getenv('TG_READER_URL');
         if (reader0)
             this._openReader(reader0, 'Reader smoke test');
-        // TG_EDIT=1 starts in reorder mode (dev/testing hook)
-        if (GLib.getenv('TG_EDIT'))
-            this._setEdit(true, true);
         // TG_SEARCH=aapl types into the inline search box and picks the
         // top result — via a synthesized row click when TG_CLICK is set,
         // else via Enter — exercising the full preview paths without a
@@ -491,9 +492,39 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._symList.add_css_class('navigation-sidebar');
         this._symList.set_selection_mode(Gtk.SelectionMode.SINGLE);
         this._symList.connect('row-activated', (l, row) => {
+            if (this._swipeOpen)
+                this._setSwipe(row, false);
             if (row?._sym)
                 this._selectSymbol(row._sym);
         });
+        {
+            // hold-drag reordering: rows are DragSources (prepare hands
+            // out the symbol), the list is the one DropTarget. The drop
+            // inserts before/after the row under the pointer by which
+            // half of it was landed on, then writes the on-screen order
+            // back to gsettings
+            const dt = new Gtk.DropTarget({actions: Gdk.DragAction.MOVE});
+            dt.connect('drop', (t, value, x, y) => {
+                const src = this._dndRow;
+                if (!src || typeof value !== 'string' || value !== src._sym)
+                    return false;
+                const dst = this._symList.get_row_at_y(y);
+                if (!dst || dst === src)
+                    return false;
+                const rows = [];
+                for (let c = this._symList.get_first_child(); c;
+                     c = c.get_next_sibling())
+                    rows.push(c);
+                const a = dst.get_alloc();
+                let ix = rows.indexOf(dst) + (y > a.y + a.height / 2 ? 1 : 0);
+                if (rows.indexOf(src) < ix)
+                    ix--;                       // lifting src shifts left
+                this._symList.insert(src, ix);
+                this._persistRowOrder();
+                return true;
+            });
+            this._symList.add_controller(dt);
+        }
         const symClick = new Gtk.GestureClick();
         symClick.set_button(3);
         symClick.connect('pressed', (g, nPress, x, y) => {
@@ -759,32 +790,29 @@ class TickerWindow extends Adw.ApplicationWindow {
             praw.append(priceL);
             praw.append(pctL);
             box.append(praw);
-            // reorder-mode controls, hidden until a long-press flips
-            // _editOn: ▲▼ move the symbol, ✕ removes it. Buttons eat
-            // their clicks, so row selection is unaffected.
-            const editBox = new Gtk.Box({spacing: 2,
-                                         valign: Gtk.Align.CENTER});
-            editBox.set_visible(false);
-            const mkBtn = (label, tip, cb, down = false) => {
-                const b = new Gtk.Button({label, tooltip_text: tip});
-                b.add_css_class('flat');
-                b.add_css_class('tg-edit-btn');
-                if (down)
-                    b.add_css_class('tg-down');
-                b.connect('clicked', cb);
-                return b;
-            };
-            editBox.append(mkBtn('▲', `Move ${sym} up`,
-                                 () => this._moveSymbol(sym, -1)));
-            editBox.append(mkBtn('▼', `Move ${sym} down`,
-                                 () => this._moveSymbol(sym, 1)));
-            editBox.append(mkBtn('✕', `Remove ${sym} from “${wl.name}”`,
-                                 () => this._removeSymbol(sym), true));
-            box.append(editBox);
-            row._editBox = editBox;
-            const lp = new Gtk.GestureLongPress();
-            lp.connect('pressed', () => this._setEdit(!this._editOn));
-            row.add_controller(lp);
+            // swipe-to-delete: the red ✕ rides the row's flow layout at
+            // zero width until a horizontal GestureDrag pushes it in.
+            // Vertical hold-drag is the DragSource's (long-press-to-move):
+            // early pointer motion cancels DragSource's activation, so
+            // the two never fight over the same press.
+            const delBtn = new Gtk.Button({label: '✕',
+                                           valign: Gtk.Align.FILL});
+            delBtn.set_visible(false);
+            delBtn.add_css_class('tg-del-reveal');
+            delBtn.connect('clicked', () => {
+                this._setSwipe(row, false);
+                this._removeSymbol(sym);
+            });
+            box.append(delBtn);
+            row._delBtn = delBtn;
+            row.add_controller(this._swipeGesture(row, delBtn));
+            const ds = new Gtk.DragSource({actions: Gdk.DragAction.MOVE});
+            ds.connect('prepare', () => {
+                this._dndRow = row;
+                return Gdk.ContentProvider.new_for_value(row._sym);
+            });
+            ds.connect('drag-end', () => { this._dndRow = null; });
+            row.add_controller(ds);
             row.set_child(box);
             row._priceL = priceL;
             row._pctL = pctL;
@@ -793,42 +821,71 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._symRows[sym] = row;
         }
         this._updateWatchRows();
-        this._setEdit(!!this._editOn, true);   // rebuild keeps edit mode
+        this._swipeOpen = null;               // rows are new objects now
         this._repaintTitle();
     }
 
-    /* long-press toggle: show/hide the ▲▼✕ controls on every row.
-     * quiet=true re-applies state after a rebuild (no toast repeat). */
-    _setEdit(on, quiet = false) {
-        const was = !!this._editOn;
-        this._editOn = on;
-        for (const row of Object.values(this._symRows ?? {})) {
-            row._editBox?.set_visible(on);
-            // the sparkline is decoration while reordering and eats the
-            // width the symbol label needs next to the buttons
-            row._spark?.set_visible(!on);
-            if (on)
-                row.add_css_class('tg-row-edit');
-            else
-                row.remove_css_class('tg-row-edit');
+    /* swipe-to-delete state: at most one row is open. The button takes
+     * real width in the row's hbox (content compresses) — cheap and
+     * flicker-free against overlays on transparent rows. */
+    _setSwipe(row, open) {
+        for (const r of Object.values(this._symRows ?? {})) {
+            if (r !== row) {
+                r._delBtn?.set_visible(false);
+                r._delBtn?.set_size_request(-1, -1);
+            }
         }
-        if (on && !was && !quiet)
-            this._toast('Reorder mode — ▲ ▼ move, ✕ removes. '
-                        + 'Long-press a row again to finish.');
+        row._delBtn?.set_visible(open);
+        row._delBtn?.set_size_request(open ? TG_DEL_W : -1, -1);
+        this._swipeOpen = open ? row : null;
     }
 
-    /* swap a symbol one step in the active list; the gsettings write
-     * fans out to a sidebar rebuild, which restores edit mode */
-    _moveSymbol(symbol, dir) {
+    /* the row's GestureDrag: horizontal movement claims the reveal,
+     * anything else is left to the click and the DragSource; the axis
+     * locks on the first motion past the touch threshold */
+    _swipeGesture(row, btn) {
+        const g = new Gtk.GestureDrag();
+        let axis = null, startOff = 0, off = 0;
+        g.connect('drag-begin', () => {
+            axis = null;
+            startOff = off = this._swipeOpen === row ? TG_DEL_W : 0;
+        });
+        g.connect('drag-update', (self, x, y) => {
+            if (axis === null) {
+                if (Math.abs(x) < 5 && Math.abs(y) < 5)
+                    return;
+                axis = Math.abs(x) > Math.abs(y) ? 'x' : 'y';
+            }
+            if (axis !== 'x')
+                return;
+            off = Math.max(0, Math.min(TG_DEL_W, startOff - x));
+            if (off > 1 && this._swipeOpen && this._swipeOpen !== row)
+                this._setSwipe(this._swipeOpen, false);
+            btn.set_visible(off > 1);
+            btn.set_size_request(Math.round(off), -1);
+        });
+        g.connect('drag-end', () => {
+            // GestureDrag folds cancel into end — settle covers both
+            if (axis === 'x')
+                this._setSwipe(row, off > TG_DEL_W / 2);
+        });
+        return g;
+    }
+
+    /* write the on-screen row order back to gsettings (after DnD) */
+    _persistRowOrder() {
         const lists = this._lists();
         const wl = this._activeList(lists);
         if (!wl)
             return;
-        const i = wl.symbols.indexOf(symbol);
-        const j = i + dir;
-        if (i < 0 || j < 0 || j >= wl.symbols.length)
+        const order = [];
+        for (let c = this._symList.get_first_child(); c;
+             c = c.get_next_sibling())
+            if (c._sym)
+                order.push(c._sym);
+        if (!order.length)
             return;
-        [wl.symbols[i], wl.symbols[j]] = [wl.symbols[j], wl.symbols[i]];
+        wl.symbols = order;
         this._writeLists(lists);
     }
 
