@@ -124,34 +124,31 @@ class TickerWindow extends Adw.ApplicationWindow {
         const reader0 = GLib.getenv('TG_READER_URL');
         if (reader0)
             this._openReader(reader0, 'Reader smoke test');
-        // TG_SEARCH=netflix opens the search dialog, types the query, and
-        // picks the top result — via a synthesized row click when TG_CLICK
-        // is set, else via Enter — exercising the full add-and-jump paths
-        // without a physical keyboard (dev/testing hook)
+        // TG_SEARCH=aapl types into the inline search box and picks the
+        // top result — via a synthesized row click when TG_CLICK is set,
+        // else via Enter — exercising the full preview paths without a
+        // physical keyboard (dev/testing hook)
         const search0 = GLib.getenv('TG_SEARCH');
         const useClick = GLib.getenv('TG_CLICK');
         if (search0)
             GLib.timeout_add(GLib.PRIORITY_DEFAULT, 2500, () => {
-                log(`TickerGlass: TG_SEARCH opening dialog (${search0}, ` +
+                log(`TickerGlass: TG_SEARCH typing (${search0}, ` +
                     `click-mode=${useClick ? 'y' : 'n'})`);
-                this._openSearch();
-                const dlg = this._searchDlg;
-                if (!dlg)
-                    return GLib.SOURCE_REMOVE;
-                dlg._entry.set_text(search0);
+                const e = this._searchEntry;
+                e.grab_focus();
+                e.set_text(search0);
+                e.emit('search-changed');   // set_text doesn't fire it
                 const t0 = GLib.get_monotonic_time();
                 GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, () => {
-                    if (!this._searchDlg)          // already closed
-                        return GLib.SOURCE_REMOVE;
-                    if (dlg._hasResults() ||
+                    if (e._hasResults() ||
                         GLib.get_monotonic_time() - t0 > 25e6) {
                         if (useClick)
-                            dlg._clickFirst();
+                            e._clickFirst();
                         else
-                            dlg._submit();
+                            e._submit();
+                        return GLib.SOURCE_REMOVE;   // pick once
                     }
-                    return this._searchDlg ? GLib.SOURCE_CONTINUE
-                                           : GLib.SOURCE_REMOVE;
+                    return GLib.SOURCE_CONTINUE;
                 });
                 return GLib.SOURCE_REMOVE;
             });
@@ -188,12 +185,17 @@ class TickerWindow extends Adw.ApplicationWindow {
             valign: Gtk.Align.CENTER, css_classes: ['tg-read-title'],
         });
         this._readTitle.set_visible(false);
-        const searchBtn = new Gtk.Button({icon_name: 'edit-find-symbolic',
-                                          tooltip_text: 'Add symbol (/)'});
-        searchBtn.set_action_name('win.search');
         const menuBtn = this._menuBtn();
         hbar.pack_end(menuBtn);
-        hbar.pack_end(searchBtn);
+        // inline header search with an autocomplete popover: type, see
+        // candidates drop down, click to preview — never leaves the page
+        const search = new Gtk.SearchEntry({
+            placeholder_text: 'Search symbol or company  ( / )',
+            width_chars: 22, max_width_chars: 30, valign: Gtk.Align.CENTER,
+        });
+        hbar.pack_end(search);
+        this._searchEntry = search;
+        this._buildSearchPopover(search);
 
         // reading mode replaces the ticker chrome entirely (back pill,
         // article title, open-externally) — toggled per visible page below
@@ -216,15 +218,9 @@ class TickerWindow extends Adw.ApplicationWindow {
         const content = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL});
         content.append(hbar);
 
-        // the window body is a two-page stack: Chart (hero + chart + news)
-        // and Table (the sortable watchlist grid); the header toggles pages
-        const viewBox = new Gtk.Box({css_classes: ['linked']});
-        const chartBtn = new Gtk.ToggleButton({label: 'Chart', tooltip_text: 'Chart view'});
-        const tableBtn = new Gtk.ToggleButton({label: 'Table', tooltip_text: 'Table view'});
-        viewBox.append(chartBtn);
-        viewBox.append(tableBtn);
-        viewBox.set_halign(Gtk.Align.CENTER);
-        hbar.pack_end(viewBox);
+        // the window body stacks Chart (hero + chart + news), Table (the
+        // sortable grid — now reached from the hamburger's View section)
+        // and the full-bleed reader page
 
         // chart page
         const chartPage = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL});
@@ -390,21 +386,16 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._stack.add_titled(chartPage, 'chart', 'Chart');
         this._stack.add_titled(tablePage, 'table', 'Table');
         content.append(this._stack);
-        for (const [btn, page] of [[chartBtn, 'chart'], [tableBtn, 'table']]) {
-            btn.connect('toggled', () => {
-                if (btn.get_active())
-                    this._stack.set_visible_child_name(page);
-            });
-        }
-        chartBtn.set_active(true);
         this._stack.connect('notify::visible-child-name', () => {
             const p = this._stack.get_visible_child_name();
-            chartBtn.set_active(p === 'chart');
-            tableBtn.set_active(p === 'table');
+            if (p === 'chart' || p === 'table')
+                this._viewAction?.set_state(new GLib.Variant('s', p));
             // the reader owns the whole pane: swap the ticker chrome out
             const reading = p === 'reader';
-            for (const w of [sideBtn, searchBtn, menuBtn, viewBox])
+            for (const w of [sideBtn, menuBtn, search])
                 w.set_visible(!reading);
+            if (reading)
+                this._searchPop?.popdown();
             this._readBack.set_visible(reading);
             this._readExt.set_visible(reading);
             this._tickerTitle.set_visible(!reading);
@@ -514,6 +505,11 @@ class TickerWindow extends Adw.ApplicationWindow {
         menu.append('Refresh', 'win.refresh');
         menu.append('Preferences…', 'win.prefs');
 
+        const viewM = new Gio.Menu();
+        viewM.append('Chart', 'win.view::chart');
+        viewM.append('Table', 'win.view::table');
+        menu.append_section('View', viewM);
+
         const src = new Gio.Menu();
         src.append('Yahoo Finance', 'win.source::yahoo');
         src.append('Yahoo via relay', 'win.source::yahoo-relay');
@@ -571,7 +567,19 @@ class TickerWindow extends Adw.ApplicationWindow {
 
         act('refresh', null, () => this._refresh(true));
         act('readerback', null, () => this._leaveReader());
-        act('search', null, () => this._openSearch());
+        act('search', null, () => {
+            this.present();
+            this._searchEntry.grab_focus();
+        });
+        const view = new Gio.SimpleAction({name: 'view',
+            parameter_type: new GLib.VariantType('s'),
+            state: new GLib.Variant('s', 'chart')});
+        view.connect('change-state', (a, v) => {
+            this._stack.set_visible_child_name(v.get_string()[0]);
+            a.set_state(v);
+        });
+        this.add_action(view);
+        this._viewAction = view;
         act('sidebar', null, () =>
             this._split.set_show_sidebar(!this._split.show_sidebar));
         act('newlist', null, () => this._newListDialog());
@@ -840,47 +848,39 @@ class TickerWindow extends Adw.ApplicationWindow {
 
     /* ── search dialog ────────────────────────────────────────────────── */
 
-    _openSearch() {
-        if (this._searchDlg)
-            return;
-        const dlg = new Adw.Dialog({title: 'Add symbol', can_close: true});
-        this._searchDlg = dlg;
-        dlg.connect('closed', () => { this._searchDlg = null; });
-
-        const bin = new Adw.Bin();
-        bin.add_css_class('dlg-pad');
-        const box = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL,
-                                 spacing: 6});
-        const clamp = new Adw.Clamp({maximum_size: 480});
-        const entry = new Adw.EntryRow({title: 'Search or type a Yahoo symbol',
-                                        show_apply_button: false});
-        box.append(entry);
-
-        const listScroll = new Gtk.ScrolledWindow({
-            vexpand: true, min_content_height: 180, max_content_height: 320,
+    /* autocomplete lives in a popover anchored to the header SearchEntry;
+     * the search machinery (debounce, placeholder row, raw-text fallback)
+     * is the same that served the old modal dialog */
+    _buildSearchPopover(entry) {
+        const pop = new Gtk.Popover({autohide: true});
+        const scroller = new Gtk.ScrolledWindow({
+            hscrollbar_policy: Gtk.PolicyType.NEVER,
+            min_content_height: 120, max_content_height: 340,
+            propagate_natural_height: true,
         });
         const results = new Gtk.ListBox();
         results.add_css_class('boxed-list');
-        results.set_vexpand(true);
-        // GTK's default (single click only selects, double activates) feels
-        // broken in a picker — every click should pick
         results.set_activate_on_single_click(true);
-        listScroll.set_child(results);
-        box.append(listScroll);
-
-        const hint = new Gtk.Label({
-            label: 'Stocks, ETFs, indices (^GSPC), FX (EURUSD=X), crypto ' +
-                   '(BTC-USD), futures (ES=F)',
-            css_classes: ['dim-label', 'caption'], wrap: true,
+        scroller.set_child(results);
+        pop.set_child(scroller);
+        pop.set_size_request(380, -1);
+        // (no Gtk.SearchEntry.set_popover on this GTK build: parent it by
+        // hand and drop it under the entry)
+        pop.set_parent(entry);
+        pop.set_position(Gtk.PositionType.BOTTOM);
+        this._searchPop = pop;
+        entry.connect('notify::has-focus', () => {
+            if (!entry.is_focus())
+                pop.popdown();
         });
-        box.append(hint);
-        clamp.set_child(box);
-        bin.set_child(clamp);
-        dlg.set_child(bin);
 
         let seq = 0;
         let pending = 0;
-        let lastRes = [];        // latest search results (for Enter)
+        let lastRes = [];        // latest results, for Enter
+        const finish = () => {
+            pop.popdown();
+            entry.set_text('');
+        };
         const populate = (items) => {
             lastRes = items;
             for (let r = results.get_first_child(); r;) {
@@ -906,15 +906,11 @@ class TickerWindow extends Adw.ApplicationWindow {
                     log(`TickerGlass: search row picked ${it.symbol}`);
                     // look first, persist only via the hero's + Watchlist
                     this._showSymbol(it.symbol, it);
-                    dlg.force_close();
+                    finish();
                 };
                 row.connect('activated', row._add);
-                // fire on a real mouse release directly — never depends on
-                // GtkListBox activate-on-single-click semantics or on
-                // AdwActionRow relaying the list's row-activated signal.
-                // (GtkGestureClick has pressed/released/cancelled — there
-                // is no 'clicked' signal; connecting one threw mid-populate
-                // and silently ate every search result)
+                // GtkGestureClick has pressed/released/cancelled — there
+                // is no 'clicked' signal; see commit 9744c51
                 const click = new Gtk.GestureClick();
                 click.connect('released', () => {
                     if (row.contains_pointer ?? true)
@@ -923,27 +919,32 @@ class TickerWindow extends Adw.ApplicationWindow {
                 row.add_controller(click);
                 results.append(row);
             }
+            if (items.some(it => !it.pending))
+                pop.popup();
         };
         const runSearch = (text) => {
             const mySeq = ++seq;
             const sym = text.trim().toUpperCase();
             if (!sym) { populate([]); return; }
-            // instant feedback: a spinner-looking row until the catalog
-            // answers (the relay path can take a few seconds)
             populate([{symbol: '…',
-                       name: text ? `Searching “${text}” …` : '',
+                       name: `Searching “${text}” …`,
                        exchange: '', type: '', pending: true}]);
             this._client.search(sym).then(res => {
                 log(`TG search ok: ${res?.length} for ${sym}`);
-                if (mySeq !== seq || this._dead || !this._searchDlg)
+                if (mySeq !== seq || this._dead)
                     return;
                 const extra = {symbol: sym,
                                name: 'Add this symbol directly',
                                exchange: '', type: ''};
                 populate([...(res ?? []), extra]);
-            }).catch(e => { log(`TG search fail: ${sym} ${e.message}`); populate([{symbol: sym, name: "Add this symbol directly"}]); });
+            }).catch(e => {
+                log(`TG search fail: ${sym} ${e.message}`);
+                if (!this._dead)
+                    populate([{symbol: sym,
+                               name: 'Add this symbol directly'}]);
+            });
         };
-        entry.connect('changed', () => {
+        entry.connect('search-changed', () => {
             if (pending)
                 GLib.source_remove(pending);
             pending = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 260, () => {
@@ -952,9 +953,6 @@ class TickerWindow extends Adw.ApplicationWindow {
                 return GLib.SOURCE_REMOVE;
             });
         });
-        // Enter submits from anywhere in the dialog (entry, results list,
-        // or nowhere) — a plain entry-activated signal proved unreliable
-        // once result rows existed
         // the real pickable candidates, as opposed to the 'Searching…'
         // placeholder and the raw-text fallback row
         const isPickable = it =>
@@ -968,31 +966,24 @@ class TickerWindow extends Adw.ApplicationWindow {
             if (!pick)
                 return false;
             this._showSymbol(pick, lastRes.find(isPickable) ?? {});
-            dlg.force_close();
+            finish();
             return true;
         };
+        entry.connect('activate', () => pickTop());
+        entry.connect('stop-search', () => {   // Escape in the entry
+            pop.popdown();
+            entry.set_text('');
+        });
+
         // hooks for the TG_SEARCH smoke test (see constructor)
-        dlg._entry = entry;
-        dlg._submit = pickTop;
-        dlg._hasResults = () => lastRes.some(isPickable);
-        dlg._clickFirst = () => {
-            // replay what a mouse click on the top row does: the listbox's
-            // row-activated signal is what Adw.ActionRow::activated rides
+        entry._submit = pickTop;
+        entry._hasResults = () => lastRes.some(isPickable);
+        entry._clickFirst = () => {
             const r = results.get_row_at_index(0);
             log(`TickerGlass: TG_CLICK top row title=${r?.title}`);
             if (r)
                 results.emit('row-activated', r);
         };
-
-        const keys = new Gtk.EventControllerKey({
-            propagation_phase: Gtk.PropagationPhase.CAPTURE,
-        });
-        keys.connect('key-pressed', (c, kv) =>
-            (kv === Gtk.KEY_Return || kv === Gtk.KEY_KP_Enter)
-                ? pickTop() : false);
-        dlg.add_controller(keys);
-
-        dlg.present(this);
     }
 
     /* ── table ─────────────────────────────────────────────────────────── */
