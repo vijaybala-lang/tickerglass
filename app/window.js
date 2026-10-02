@@ -160,31 +160,34 @@ class TickerWindow extends Adw.ApplicationWindow {
     /* ── UI construction ──────────────────────────────────────────────── */
 
     _buildUi() {
-        // ticker identity lives in the header: big symbol + softer name,
-        // exactly what the page's hero row used to eat vertical space for
-        this._heroSym = new Gtk.Label({label: 'TickerGlass',
-                                       css_classes: ['tg-win-sym']});
+        // header identity, Robinhood-style: the company name leads big and
+        // bold, the symbol rides along as a quiet badge; left justified
+        this._heroSym = new Gtk.Label({label: '', css_classes: ['tg-win-sym']});
         this._heroName = new Gtk.Label({
-            label: '', css_classes: ['tg-win-name'],
-            ellipsize: 3, max_width_chars: 30,
+            label: 'TickerGlass', css_classes: ['tg-win-name'],
+            ellipsize: 3, max_width_chars: 38,
         });
         this._tickerTitle = new Gtk.Box({
             orientation: Gtk.Orientation.HORIZONTAL, spacing: 10,
-            valign: Gtk.Align.CENTER, halign: Gtk.Align.CENTER,
+            valign: Gtk.Align.CENTER, halign: Gtk.Align.START,
+            hexpand: true, margin_start: 6,
         });
-        this._tickerTitle.append(this._heroSym);
         this._tickerTitle.append(this._heroName);
+        this._tickerTitle.append(this._heroSym);
 
         const hbar = new Adw.HeaderBar();
-        try {
-            hbar.title_widget = this._tickerTitle;
-        } catch {
-            hbar.pack(this._tickerTitle);   // older libadwaita (< 1.4)
-        }
         this.set_title('TickerGlass');
         const sideBtn = new Gtk.ToggleButton({icon_name: 'sidebar-show-symbolic',
                                               tooltip_text: 'Watchlists (F9)'});
         hbar.pack_start(sideBtn);
+        // identity is a start-packed item, not title_widget: libadwaita
+        // forces the title slot centered; packed items sit flush left
+        hbar.pack_start(this._tickerTitle);
+        this._readTitle = new Gtk.Label({
+            label: '', ellipsize: 3, max_width_chars: 45,
+            valign: Gtk.Align.CENTER, css_classes: ['tg-read-title'],
+        });
+        this._readTitle.set_visible(false);
         const searchBtn = new Gtk.Button({icon_name: 'edit-find-symbolic',
                                           tooltip_text: 'Add symbol (/)'});
         searchBtn.set_action_name('win.search');
@@ -200,6 +203,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._readBack.connect('clicked', () => this._leaveReader());
         this._readBack.set_visible(false);
         hbar.pack_start(this._readBack);
+        hbar.pack_start(this._readTitle);
         this._readExt = new Gtk.Button({icon_name: 'web-browser-symbolic',
                                         tooltip_text: 'Open in browser'});
         this._readExt.add_css_class('flat');
@@ -207,8 +211,6 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._openUrl(this._readerWeb?.get_uri()));
         this._readExt.set_visible(false);
         hbar.pack_end(this._readExt);
-        this._readTitle = new Adw.WindowTitle({title: '',
-                                               subtitle: 'Reading'});
 
         /* —— content column —— */
         const content = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL});
@@ -405,9 +407,8 @@ class TickerWindow extends Adw.ApplicationWindow {
                 w.set_visible(!reading);
             this._readBack.set_visible(reading);
             this._readExt.set_visible(reading);
-            try {
-                hbar.title_widget = reading ? this._readTitle : this._tickerTitle;
-            } catch { /* older libadwaita keeps the ticker title */ }
+            this._tickerTitle.set_visible(!reading);
+            this._readTitle.set_visible(reading);
         });
 
         // status line
@@ -1389,7 +1390,7 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._stack.add_titled(web, 'reader', 'Reader');
             this._readerWeb = web;
         }
-        this._readTitle.set_title(title ?? 'Story');
+        this._readTitle.set_label(title ?? 'Story');
         this._readerWeb.load_uri(url);
         this._stack.set_visible_child_name('reader');
     }
@@ -1444,20 +1445,29 @@ class TickerWindow extends Adw.ApplicationWindow {
         });
     }
 
-    /* the header IS the ticker name now: big symbol, softer company name */
+    /* the header IS the ticker name now: big company name, quiet symbol
+     * badge (the symbol stands in for the name until quotes land) */
     _repaintTitle() {
         const sym = this._hero();
         const q = this._quotes.find(x => x.symbol === sym)
             ?? (this._previewQ?.symbol === sym ? this._previewQ : null);
-        this._heroSym.set_label(sym ? symbolShort(sym) : 'TickerGlass');
         const name = q
             ? (q.name !== q.symbol ? q.name : q.exchange ?? '')
             : (this.isPreview()
                 ? [this._preview.name, this._preview.exchange]
                     .filter(Boolean).join(' · ')
                 : '');
-        this._heroName.set_label(name);
-        this._heroName.set_visible(!!name);
+        if (!sym) {
+            this._heroName.set_label('TickerGlass');
+            this._heroSym.set_label('');
+        } else if (name) {
+            this._heroName.set_label(name);
+            this._heroSym.set_label(symbolShort(sym));
+        } else {
+            this._heroName.set_label(symbolShort(sym));
+            this._heroSym.set_label('');
+        }
+        this._heroSym.set_visible(!!this._heroSym.get_label());
     }
 
     _updateHero() {
