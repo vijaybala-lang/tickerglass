@@ -512,6 +512,26 @@ function mdym(d) {
         `${String(d.getUTCDate()).padStart(2, '0')}`;
 }
 
+/* run fn over items with N workers; per-item failures land in the result
+ * array as the thrown Error (caller decides the fallback) */
+async function mapLimit(items, fn, limit) {
+    const out = new Array(items.length);
+    let next = 0;
+    const worker = async () => {
+        while (next < items.length) {
+            const k = next++;
+            try {
+                out[k] = await fn(items[k]);
+            } catch (e) {
+                out[k] = e;
+            }
+        }
+    };
+    const n = Math.max(1, Math.min(limit, items.length));
+    await Promise.all(Array.from({length: n}, worker));
+    return out;
+}
+
 export class NasdaqClient {
     /** @param back YahooClient (relay on) for symbols/news we cannot serve */
     constructor(back) {
@@ -729,34 +749,47 @@ export class NasdaqClient {
     }
 
     async quotes(symbols, {sparkRange = '1d'} = {}) {
-        const naq = [], viaBack = [];
-        for (const sym of symbols) {           // sequential: stay polite
-            const r = await this._quoteInfo(sym);
-            (r.ac === 'yahoo' ? viaBack : naq).push({...r, sym});
-        }
+        // 3 at a time: the old sequential loop (quote-info pass, then a
+        // spark pass per symbol) made a 9-symbol watchlist crawl for a
+        // full minute on boot; small concurrency keeps us polite
+        const results = await mapLimit(
+            symbols, sym => this._quoteOne(sym, sparkRange), 3);
         const bySym = new Map();
-        for (const it of naq) {
-            let spark = null;
-            try {
-                spark = sparkRange === '1d'
-                    ? (await this._chartSeries(it.sym, it.ac)).points.map(p => p.c)
-                    : (await this._dailyDays(
-                        it.sym, it.ac,
-                        Math.min(RANGE_DAYS[sparkRange] ?? 30, 400)
-                    )).map(p => p.c);
-            } catch { /* sparkline is optional — quote still paints */ }
-            bySym.set(it.sym, this._quoteFrom(it.sym, it.info,
-                spark && spark.length > 1 ? spark : null));
-        }
+        const viaBack = [];
+        results.forEach((r, i) => {
+            if (r instanceof Error)
+                return;                       // -> fallback error row
+            if (r.viaBack)
+                viaBack.push(symbols[i]);
+            else
+                bySym.set(symbols[i], r.q);
+        });
         let back = null;
         if (viaBack.length)
-            back = await this._back.quotes(
-                viaBack.map(i => i.sym), {sparkRange}).catch(() => null);
+            back = await this._back.quotes(viaBack, {sparkRange})
+                .catch(() => null);
         const quotes = symbols.map(sym =>
             bySym.get(sym)
             ?? back?.quotes.find(q => q.symbol === sym)
             ?? {symbol: sym, name: sym, price: null, error: true, spark: null});
         return {at: Math.floor(GLib.get_real_time() / 1e6), quotes};
+    }
+
+    /* one symbol end to end: classify, then fetch its sparkline */
+    async _quoteOne(sym, sparkRange) {
+        const r = await this._quoteInfo(sym);
+        if (r.ac === 'yahoo')
+            return {viaBack: true};
+        let spark = null;
+        try {
+            spark = sparkRange === '1d'
+                ? (await this._chartSeries(sym, r.ac)).points.map(p => p.c)
+                : (await this._dailyDays(sym, r.ac,
+                    Math.min(RANGE_DAYS[sparkRange] ?? 30, 400)
+                )).map(p => p.c);
+        } catch { /* sparkline is optional — quote still paints */ }
+        return {q: this._quoteFrom(sym, r.info,
+            spark && spark.length > 1 ? spark : null)};
     }
 
     async history(symbol, range = '1d', interval = 'auto') {
