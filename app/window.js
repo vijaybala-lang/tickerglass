@@ -839,6 +839,11 @@ class TickerWindow extends Adw.ApplicationWindow {
                 const row = new Adw.ActionRow({
                     title: it.symbol, subtitle: it.name,
                 });
+                if (it.pending) {          // 'Searching…' placeholder
+                    row.set_activatable(false);
+                    results.append(row);
+                    continue;
+                }
                 row.add_suffix(new Gtk.Label({
                     label: it.exchange || it.type || '',
                     css_classes: ['dim-label', 'caption'],
@@ -852,9 +857,15 @@ class TickerWindow extends Adw.ApplicationWindow {
                 row.connect('activated', row._add);
                 // fire on a real mouse release directly — never depends on
                 // GtkListBox activate-on-single-click semantics or on
-                // AdwActionRow relaying the list's row-activated signal
+                // AdwActionRow relaying the list's row-activated signal.
+                // (GtkGestureClick has pressed/released/cancelled — there
+                // is no 'clicked' signal; connecting one threw mid-populate
+                // and silently ate every search result)
                 const click = new Gtk.GestureClick();
-                click.connect('clicked', () => row._add());
+                click.connect('released', () => {
+                    if (row.contains_pointer ?? true)
+                        row._add();
+                });
                 row.add_controller(click);
                 results.append(row);
             }
@@ -863,14 +874,20 @@ class TickerWindow extends Adw.ApplicationWindow {
             const mySeq = ++seq;
             const sym = text.trim().toUpperCase();
             if (!sym) { populate([]); return; }
+            // instant feedback: a spinner-looking row until the catalog
+            // answers (the relay path can take a few seconds)
+            populate([{symbol: '…',
+                       name: text ? `Searching “${text}” …` : '',
+                       exchange: '', type: '', pending: true}]);
             this._client.search(sym).then(res => {
+                log(`TG search ok: ${res?.length} for ${sym}`);
                 if (mySeq !== seq || this._dead || !this._searchDlg)
                     return;
                 const extra = {symbol: sym,
                                name: 'Add this symbol directly',
                                exchange: '', type: ''};
                 populate([...(res ?? []), extra]);
-            }).catch(() => populate([{symbol: sym, name: 'Add this symbol directly'}]));
+            }).catch(e => { log(`TG search fail: ${sym} ${e.message}`); populate([{symbol: sym, name: "Add this symbol directly"}]); });
         };
         entry.connect('changed', () => {
             if (pending)
@@ -884,13 +901,16 @@ class TickerWindow extends Adw.ApplicationWindow {
         // Enter submits from anywhere in the dialog (entry, results list,
         // or nowhere) — a plain entry-activated signal proved unreliable
         // once result rows existed
+        // the real pickable candidates, as opposed to the 'Searching…'
+        // placeholder and the raw-text fallback row
+        const isPickable = it =>
+            !it.pending && it.name !== 'Add this symbol directly';
         const pickTop = () => {
             const typed = entry.get_text().trim().toUpperCase();
             // Enter accepts the top search result (typing "netflix" should
             // pick NFLX, not register a NETFLIX ticker); raw text is the
             // fallback for symbols the catalog didn't return
-            const pick = lastRes.find(
-                r => r.name !== 'Add this symbol directly')?.symbol ?? typed;
+            const pick = lastRes.find(isPickable)?.symbol ?? typed;
             if (!pick)
                 return false;
             this._addSymbol(pick);
@@ -900,8 +920,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         // hooks for the TG_SEARCH smoke test (see constructor)
         dlg._entry = entry;
         dlg._submit = pickTop;
-        dlg._hasResults = () =>
-            lastRes.some(r => r.name !== 'Add this symbol directly');
+        dlg._hasResults = () => lastRes.some(isPickable);
         dlg._clickFirst = () => {
             // replay what a mouse click on the top row does: the listbox's
             // row-activated signal is what Adw.ActionRow::activated rides
@@ -1066,7 +1085,16 @@ class TickerWindow extends Adw.ApplicationWindow {
             // don't drop the request: an add/remove landing mid-fetch must
             // still repaint once the in-flight round ends
             this._queued = true;
-            return;
+            // belt over suspenders: the client-side request deadlines
+            // should make this unreachable, but a stuck _busy must never
+            // become a permanent freeze
+            const stalled = this._busySince &&
+                GLib.get_monotonic_time() / 1e6 - this._busySince > 120;
+            if (!stalled)
+                return;
+            log('TickerGlass: fetch stalled >120s — recovering');
+            this._busy = false;
+            this._spinner.set_visible(false);
         }
         const syms = this._activeList()?.symbols ?? [];
         if (!syms.length) {
@@ -1082,6 +1110,7 @@ class TickerWindow extends Adw.ApplicationWindow {
             return;
         }
         this._busy = true;
+        this._busySince = GLib.get_monotonic_time() / 1e6;
         this._spinner.set_visible(true);
         this._client.quotes(syms, {sparkRange: '1mo'})
             .then(res => {
@@ -1090,6 +1119,7 @@ class TickerWindow extends Adw.ApplicationWindow {
                 this._quotes = res.quotes;
                 this._atWall = Math.floor(GLib.get_real_time() / 1e6);
                 this._busy = false;
+                this._busySince = 0;
                 this._spinner.set_visible(false);
                 this._refreshTable();
                 this._updateWatchRows();
@@ -1111,6 +1141,7 @@ class TickerWindow extends Adw.ApplicationWindow {
                     return;
                 logError(e, 'TickerGlass app');
                 this._busy = false;
+                this._busySince = 0;
                 this._spinner.set_visible(false);
                 this._setStatus(`Fetch failed: ${e.message}`);
                 this._drainRefresh();

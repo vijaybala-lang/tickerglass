@@ -94,7 +94,7 @@ export class YahooClient {
             (this._penalty.get(a) ?? 0) <= (this._penalty.get(b) ?? 0) ? a : b);
     }
 
-    _get(url, {json = true} = {}) {
+    _get(url, {json = true, deadline = 40} = {}) {
         return new Promise((resolve, reject) => {
             // relays 403 browser-spoofing UAs from non-browsers — announce
             // ourselves honestly there; keep the Firefox one for Yahoo direct
@@ -113,6 +113,18 @@ export class YahooClient {
             msg.request_headers.append('Accept-Language', 'en-US,en;q=0.5');
             if (this._relay)
                 msg.request_headers.append('X-Return-Format', 'text');
+            // hard deadline: libsoup's timeout only counts gaps between
+            // packets, and a half-dead CGNAT connection can dribble forever
+            let done = false;
+            const timer = GLib.timeout_add_seconds(
+                GLib.PRIORITY_DEFAULT, deadline, () => {
+                    if (done)
+                        return GLib.SOURCE_REMOVE;
+                    done = true;
+                    session.abort();
+                    reject(new Error('timeout'));
+                    return GLib.SOURCE_REMOVE;
+                });
             session.send_and_read_async(msg, GLib.PRIORITY_DEFAULT, null,
                                         (sess, res) => {
                 let body = '';
@@ -120,6 +132,10 @@ export class YahooClient {
                     const bytes = sess.send_and_read_finish(res);
                     body = bytes ? new TextDecoder().decode(bytes.get_data()) : '';
                     const st = httpStatus(msg);
+                    if (done)                    // deadline already claimed it
+                        return;
+                    done = true;
+                    GLib.source_remove(timer);
                     if (st === 429)
                         throw new HttpError(429, body);
                     if (st >= 400)
@@ -134,6 +150,10 @@ export class YahooClient {
                     }
                     resolve(json ? JSON.parse(body) : body);
                 } catch (e) {
+                    if (done)                    // the deadline already won
+                        return;
+                    done = true;
+                    GLib.source_remove(timer);
                     reject(e instanceof HttpError ? e
                           : new Error(e.message || 'parse error'));
                 } finally {
@@ -177,9 +197,29 @@ export class YahooClient {
     }
 
     /* cookie + crumb handshake: fc.yahoo.com 404s but sets A1/A3 cookies on
-     * the session jar; getcrumb then echoes the crumb for that cookie. */
-    async _bootstrapCrumb() {
+     * the session jar; getcrumb then echoes the crumb for that cookie.
+     * Race-bounded: neither await may strand a 429-retry path forever. */
+    _bootstrapCrumb() {
+        return new Promise(res => {
+            let settled = false;
+            const done = v => {
+                if (settled)
+                    return;
+                settled = true;
+                try { this._bootSess?.abort(); } catch {}
+                res(v);
+            };
+            GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 15, () => {
+                done('');       // timed out: treat as "no crumb available"
+                return GLib.SOURCE_REMOVE;
+            });
+            this._innerCrumb().then(done).catch(() => done(''));
+        });
+    }
+
+    async _innerCrumb() {
         const session = new Soup.Session({user_agent: UA, timeout: 15});
+        this._bootSess = session;
         try {
             const seed = Soup.Message.new('GET', 'https://fc.yahoo.com');
             await new Promise(res => session.send_and_read_async(
@@ -209,6 +249,7 @@ export class YahooClient {
             }
         } finally {
             session.abort();
+            this._bootSess = null;
         }
         this._crumb = '';
         return '';
@@ -509,6 +550,18 @@ export class NasdaqClient {
             msg.request_headers.append('Accept', 'application/json');
             msg.request_headers.append('Origin', 'https://www.nasdaq.com');
             msg.request_headers.append('Referer', 'https://www.nasdaq.com/');
+            // hard deadline (see YahooClient._get): a stalled socket must
+            // never strand a pending promise — _busy would stay stuck
+            let done = false;
+            const timer = GLib.timeout_add_seconds(
+                GLib.PRIORITY_DEFAULT, 25, () => {
+                    if (done)
+                        return GLib.SOURCE_REMOVE;
+                    done = true;
+                    session.abort();
+                    reject(new Error('timeout'));
+                    return GLib.SOURCE_REMOVE;
+                });
             session.send_and_read_async(msg, GLib.PRIORITY_DEFAULT, null,
                                         (sess, res) => {
                 try {
@@ -516,10 +569,18 @@ export class NasdaqClient {
                     const body =
                         bytes ? new TextDecoder().decode(bytes.get_data()) : '';
                     const st = httpStatus(msg);
+                    if (done)
+                        return;
+                    done = true;
+                    GLib.source_remove(timer);
                     if (st >= 400)
                         throw new HttpError(st, body);
                     resolve(JSON.parse(body));
                 } catch (e) {
+                    if (done)
+                        return;
+                    done = true;
+                    GLib.source_remove(timer);
                     reject(e instanceof HttpError ? e
                           : new Error(e.message || 'parse error'));
                 } finally {
