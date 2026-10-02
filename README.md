@@ -56,7 +56,7 @@ rm -f ~/.local/share/applications/dev.vijaybala.TickerGlass.desktop
 
 ## Data sources
 
-Three settings for `data-source`:
+Four settings for `data-source`:
 
 - **`yahoo`** — talks to Yahoo's keyless `query*.finance.yahoo.com`
   endpoints directly. No API key, but these endpoints rate-limit hard by
@@ -68,6 +68,11 @@ Three settings for `data-source`:
   request (a few seconds) but works from networks Yahoo won't serve at
   all — pick this from the menu / Preferences if plain Yahoo only ever
   says "Rate limited".
+- **`nasdaq`** — Nasdaq's keyless site API (`api.nasdaq.com`): live
+  quotes and full daily history for US-listed stocks and ETFs on any
+  exchange, answered instantly even by networks Yahoo blanket-blocks.
+  It has no crypto, indices or news — those symbols (e.g. `BTC-USD`)
+  and the news feed are transparently resolved through the relay.
 - **`demo`** — a deterministic pseudo-market that paints the same UI
   offline; every chart ends exactly at the quote price, so screenshots
   and tests stay honest:

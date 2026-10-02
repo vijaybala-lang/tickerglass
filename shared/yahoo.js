@@ -1,5 +1,6 @@
-/* yahoo.js — Yahoo Finance client (no API key) + the MarketClient facade
- * that switches between 'yahoo' and 'demo'. Same conventions as
+/* yahoo.js — Yahoo Finance client (no API key), a Nasdaq site-API client
+ * (keyless, US stocks/ETFs), and the MarketClient facade that switches
+ * between 'yahoo', 'yahoo-relay', 'nasdaq' and 'demo'. Same conventions as
  * weatherglass/weather.js: fresh Soup.Session per request, promise-wrapped
  * send_and_read_async, session.abort() in finally, plain-object results.
  *
@@ -15,7 +16,7 @@
 
 import GLib from 'gi://GLib';
 import Soup from 'gi://Soup?version=3.0';
-import {intervalFor} from './fmt.js';
+import {intervalFor, RANGE_DAYS} from './fmt.js';
 import {DemoClient} from './mock.js';
 
 /* Read a message's HTTP code defensively: some distro builds ship a
@@ -429,11 +430,334 @@ export function subsample(arr, maxN) {
     return out;
 }
 
+/* ── Nasdaq client ────────────────────────────────────────────────────── */
+
+/* Nasdaq's public site API: keyless, covers US-listed stocks and ETFs on
+ * any exchange (verified: NYSE, NasdaqGS, Arca), and answers polite
+ * browser-shaped requests from networks Yahoo blanket-429s. Symbols it
+ * does not list (crypto, indices) fall through to the relayed Yahoo
+ * client handed in as `back`. No batch endpoint — requests are issued
+ * sequentially to stay courteous. */
+
+const NASDAQ_API = 'https://api.nasdaq.com';
+
+const NASDAQ_STATE = {
+    Regular: 'REGULAR', 'Pre-Market': 'PRE', 'Post-Market': 'POST',
+    Closed: 'CLOSED',
+};
+
+/* "$330.32", "-0.81%", "36,306,585", "N/A" → number | null */
+function parseNum(s) {
+    if (s == null || s === '')
+        return null;
+    const t = String(s).replace(/[$\s,%]/g, '');
+    if (!t || t === 'N/A' || t === 'NA' || t === '--')
+        return null;
+    const v = Number(t);
+    return Number.isFinite(v) ? v : null;
+}
+
+/* "09/30/2026" → epoch seconds at noon ET — daily bars land on the right
+ * calendar day no matter the machine's timezone */
+function parseMDY(s) {
+    const m = /(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(String(s ?? ''));
+    return m ? Date.UTC(+m[3], +m[1] - 1, +m[2], 16) / 1000 : 0;
+}
+
+/* Date → 'YYYY-MM-DD' (the wire format these endpoints accept) */
+function mdym(d) {
+    return `${d.getUTCFullYear()}-` +
+        `${String(d.getUTCMonth() + 1).padStart(2, '0')}-` +
+        `${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
+export class NasdaqClient {
+    /** @param back YahooClient (relay on) for symbols/news we cannot serve */
+    constructor(back) {
+        this.name = 'nasdaq';
+        this._back = back;
+        this._class = new Map();              // symbol → 'stocks'|'etf'|'yahoo'
+        this._penaltyUntil = 0;
+        this._consecFail = 0;
+    }
+
+    /** Seconds until we may hit the network again (0 = now). */
+    retryIn() {
+        return Math.max(0,
+            Math.ceil(this._penaltyUntil - GLib.get_monotonic_time() / 1e6));
+    }
+
+    _noteFailure() {
+        this._consecFail++;
+        this._penaltyUntil = GLib.get_monotonic_time() / 1e6 +
+            Math.min(600, 30 * 2 ** Math.min(this._consecFail, 5));
+    }
+
+    _noteSuccess() {
+        this._consecFail = 0;
+        this._penaltyUntil = 0;
+    }
+
+    _get(path) {
+        return new Promise((resolve, reject) => {
+            const session = new Soup.Session({user_agent: UA, timeout: 20});
+            const msg = Soup.Message.new('GET', NASDAQ_API + path);
+            if (!msg) {
+                reject(new Error(`bad url: ${path}`));
+                return;
+            }
+            msg.request_headers.append('Accept', 'application/json');
+            msg.request_headers.append('Origin', 'https://www.nasdaq.com');
+            msg.request_headers.append('Referer', 'https://www.nasdaq.com/');
+            session.send_and_read_async(msg, GLib.PRIORITY_DEFAULT, null,
+                                        (sess, res) => {
+                try {
+                    const bytes = sess.send_and_read_finish(res);
+                    const body =
+                        bytes ? new TextDecoder().decode(bytes.get_data()) : '';
+                    const st = httpStatus(msg);
+                    if (st >= 400)
+                        throw new HttpError(st, body);
+                    resolve(JSON.parse(body));
+                } catch (e) {
+                    reject(e instanceof HttpError ? e
+                          : new Error(e.message || 'parse error'));
+                } finally {
+                    session.abort();
+                }
+            });
+        });
+    }
+
+    async _try(path) {
+        try {
+            const d = await this._get(path);
+            this._noteSuccess();
+            return d;
+        } catch (e) {
+            if (/HTTP 4(03|29)/.test(e.message)) {
+                this._noteFailure();
+                log(`TickerGlass: nasdaq throttled, backing off ${this.retryIn()}s`);
+            }
+            throw e;
+        }
+    }
+
+    /* symbol → assetclass, probing stocks then etf once and caching the
+     * verdict (including 'yahoo' for symbols Nasdaq has never heard of) */
+    async _quoteInfo(sym) {
+        const known = this._class.get(sym);
+        for (const ac of known ? [known] : ['stocks', 'etf']) {
+            if (ac === 'yahoo')
+                return {ac, info: null};
+            try {
+                const d = await this._try(
+                    `/api/quote/${encodeURIComponent(sym)}/info` +
+                    `?assetclass=${ac}`);
+                if (d?.data) {
+                    this._class.set(sym, ac);
+                    return {ac, info: d.data};
+                }
+            } catch { /* wrong class or transient — try next / give up */ }
+        }
+        this._class.set(sym, 'yahoo');
+        return {ac: 'yahoo', info: null};
+    }
+
+    _cleanName(d) {
+        return (d.companyName ?? '')
+            .replace(/\s+Class\s+[A-Z]\s+Common Stock$/i, '')
+            .replace(/\s+Common Stock$/i, '') || (d.symbol ?? '');
+    }
+
+    _quoteFrom(sym, d, spark) {
+        const p = d.primaryData ?? {};
+        const price = parseNum(p.lastSalePrice);
+        const change = parseNum(p.netChange);
+        const pct = parseNum(p.percentageChange);
+        const wk = (d.keyStats?.fiftyTwoWeekHighLow?.value ?? '')
+            .split('-').map(t => parseNum(t));
+        const dr = (d.keyStats?.dayrange?.value ?? '')
+            .split('-').map(t => parseNum(t));
+        return {
+            symbol: sym,
+            name: this._cleanName(d),
+            price,
+            prevClose: price != null && change != null ? price - change : null,
+            change, changePct: pct != null ? pct / 100 : null,
+            dayHigh: dr[0] ?? null, dayLow: dr[1] ?? null,
+            open: null,
+            volume: parseNum(p.volume),
+            wk52High: wk[1] ?? null, wk52Low: wk[0] ?? null,
+            currency: p.currency || 'USD',
+            exchange: d.exchange ?? '',
+            type: 'EQUITY',
+            state: NASDAQ_STATE[d.marketStatus] ?? 'REGULAR',
+            tz: 'America/New_York',
+            marketTime: null,
+            spark: spark ? subsample(spark, 40) : null,
+        };
+    }
+
+    _metaFrom(sym, d) {
+        const p = d?.primaryData ?? {};
+        const price = parseNum(p.lastSalePrice);
+        const change = parseNum(p.netChange);
+        const wk = (d?.keyStats?.fiftyTwoWeekHighLow?.value ?? '')
+            .split('-').map(t => parseNum(t));
+        const dr = (d?.keyStats?.dayrange?.value ?? '')
+            .split('-').map(t => parseNum(t));
+        return {
+            price,
+            prevClose: price != null && change != null ? price - change : null,
+            currency: p.currency || 'USD',
+            exchange: d?.exchange ?? '',
+            state: NASDAQ_STATE[d?.marketStatus] ?? 'REGULAR',
+            tz: 'America/New_York',
+            marketTime: null,
+            wk52High: wk[1] ?? null, wk52Low: wk[0] ?? null,
+            dayHigh: dr[0] ?? null, dayLow: dr[1] ?? null,
+            open: null,
+            volume: parseNum(p.volume),
+            sessionStart: null, sessionEnd: null,
+        };
+    }
+
+    /* today's intraday session (also answers with the live quote) */
+    async _chartSeries(sym, ac) {
+        const d = await this._try(
+            `/api/quote/${encodeURIComponent(sym)}/chart?assetclass=${ac}`);
+        const out = [];
+        for (const r of d?.data?.chart ?? []) {
+            const v = typeof r?.y === 'number' ? r.y : parseNum(r?.z?.value);
+            const t = r?.x ? r.x / 1000 : 0;
+            if (v != null && t)
+                out.push({t, c: v, o: v, h: v, l: v, v: 0});
+        }
+        return {points: out, data: d?.data ?? null};
+    }
+
+    /* daily OHLCV bars, chronological (the feed sends newest-first) */
+    async _daily(sym, ac, fromStr, toStr, limit) {
+        const d = await this._try(
+            `/api/quote/${encodeURIComponent(sym)}/historical` +
+            `?assetclass=${ac}&fromdate=${fromStr}&todate=${toStr}` +
+            `&limit=${limit}`);
+        const pts = (d?.data?.tradesTable?.rows ?? []).map(r => ({
+            t: parseMDY(r.date),
+            c: parseNum(r.close),
+            o: parseNum(r.open),
+            h: parseNum(r.high),
+            l: parseNum(r.low),
+            v: parseNum(r.volume) ?? 0,
+        })).filter(p => p.t && p.c != null);
+        pts.reverse();
+        for (const p of pts) {
+            p.o ??= p.c;
+            p.h ??= p.c;
+            p.l ??= p.c;
+        }
+        return pts;
+    }
+
+    async _dailyDays(sym, ac, days) {
+        const now = new Date();
+        const from = new Date(now.getTime() - (days + 4) * 86400e3);
+        return this._daily(sym, ac, mdym(from), mdym(now),
+            Math.min(days + 10, 420));
+    }
+
+    async quotes(symbols, {sparkRange = '1d'} = {}) {
+        const naq = [], viaBack = [];
+        for (const sym of symbols) {           // sequential: stay polite
+            const r = await this._quoteInfo(sym);
+            (r.ac === 'yahoo' ? viaBack : naq).push({...r, sym});
+        }
+        const bySym = new Map();
+        for (const it of naq) {
+            let spark = null;
+            try {
+                spark = sparkRange === '1d'
+                    ? (await this._chartSeries(it.sym, it.ac)).points.map(p => p.c)
+                    : (await this._dailyDays(
+                        it.sym, it.ac,
+                        Math.min(RANGE_DAYS[sparkRange] ?? 30, 400)
+                    )).map(p => p.c);
+            } catch { /* sparkline is optional — quote still paints */ }
+            bySym.set(it.sym, this._quoteFrom(it.sym, it.info,
+                spark && spark.length > 1 ? spark : null));
+        }
+        let back = null;
+        if (viaBack.length)
+            back = await this._back.quotes(
+                viaBack.map(i => i.sym), {sparkRange}).catch(() => null);
+        const quotes = symbols.map(sym =>
+            bySym.get(sym)
+            ?? back?.quotes.find(q => q.symbol === sym)
+            ?? {symbol: sym, name: sym, price: null, error: true, spark: null});
+        return {at: Math.floor(GLib.get_real_time() / 1e6), quotes};
+    }
+
+    async history(symbol, range = '1d', interval = 'auto') {
+        const {ac, info} = await this._quoteInfo(symbol);
+        if (ac === 'yahoo')
+            return this._back.history(symbol, range, interval);
+        const meta = this._metaFrom(symbol, info);
+        let points = [];
+        if (range === '1d') {
+            const ch = await this._chartSeries(symbol, ac);
+            points = ch.points;
+            if (ch.data) {
+                meta.price = parseNum(ch.data.lastSalePrice) ?? meta.price;
+                meta.prevClose = parseNum(ch.data.previousClose) ?? meta.prevClose;
+                meta.volume = parseNum(ch.data.volume) ?? meta.volume;
+            }
+            if (!points.length) {
+                // weekend/holiday: the session feed is empty — show the
+                // last five trading days instead of a blank canvas
+                const now = new Date();
+                points = await this._daily(symbol, ac,
+                    mdym(new Date(now.getTime() - 9 * 86400e3)), mdym(now), 10);
+            }
+        } else {
+            const days = RANGE_DAYS[range] ?? 30;
+            const now = new Date();
+            const from = range === 'ytd'
+                ? `${now.getUTCFullYear()}-01-01`
+                : mdym(new Date(now.getTime() - (days + 6) * 86400e3));
+            points = await this._daily(symbol, ac, from, mdym(now),
+                Math.min(Math.ceil(days * 1.6) + 10, 3200));
+        }
+        if (!points.length)
+            throw new Error(`history ${symbol}: empty`);
+        return {
+            symbol, range,
+            interval: range === '1d' ? '1m' : intervalFor(range, interval),
+            meta, points,
+        };
+    }
+
+    /* no keyless search on nasdaq.com — the relayed Yahoo catalog answers */
+    async search(q) {
+        return this._back.search(q);
+    }
+
+    /* ditto news */
+    async news(symbol) {
+        return this._back.news(symbol);
+    }
+}
+
 /* ── facade ─────────────────────────────────────────────────────────────── */
 
 export class MarketClient {
     constructor(source = 'yahoo') {
         this._yahoo = new YahooClient();
+        /* relayed Yahoo client the Nasdaq source leans on for symbols it
+         * does not list (crypto, indices) and for news */
+        this._yahooBack = new YahooClient();
+        this._yahooBack.setRelay(RELAY);
+        this._nasdaq = null;
         this._demo = new DemoClient();
         this.setSource(source);
     }
@@ -441,12 +765,19 @@ export class MarketClient {
     setSource(source) {
         // 'yahoo-relay' = same Yahoo API, fetched through a public reader
         // proxy (clean IP) when our own egress gets blanket-429'd
+        // 'nasdaq' = direct keyless api.nasdaq.com (US stocks/ETFs only;
+        //            unknown symbols + news ride the relay)
         this._yahoo.setRelay(source === 'yahoo-relay' ? RELAY : null);
-        this.source = source === 'demo' ? 'demo' : 'yahoo';
+        this.source = source === 'demo' ? 'demo'
+            : source === 'nasdaq' ? 'nasdaq' : 'yahoo';
     }
 
     get _impl() {
-        return this.source === 'demo' ? this._demo : this._yahoo;
+        if (this.source === 'demo')
+            return this._demo;
+        if (this.source === 'nasdaq')
+            return this._nasdaq ??= new NasdaqClient(this._yahooBack);
+        return this._yahoo;
     }
 
     retryIn() {

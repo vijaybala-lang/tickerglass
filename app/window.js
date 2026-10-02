@@ -67,6 +67,15 @@ const COLS = [
 
 const INTRADAY = new Set(['1d', '5d']);
 
+/* status-line display name per data-source setting value */
+const SOURCE_LABEL = {
+    yahoo: 'Yahoo Finance', 'yahoo-relay': 'Yahoo Finance',
+    nasdaq: 'Nasdaq', demo: 'Demo feed',
+};
+function sourceLabel(id) {
+    return SOURCE_LABEL[id] ?? 'Yahoo Finance';
+}
+
 /* gjs exposes hyphenated GObject props camelCased: 'price-n' → .priceN */
 const camel = p => p.replace(/-(\w)/g, (m, c) => c.toUpperCase());
 
@@ -115,6 +124,29 @@ class TickerWindow extends Adw.ApplicationWindow {
         const reader0 = GLib.getenv('TG_READER_URL');
         if (reader0)
             this._openReader(reader0, 'Reader smoke test');
+        // TG_SEARCH=netflix opens the search dialog, types the query, and
+        // hits Enter once results land — exercises the full add-and-jump
+        // path without a physical keyboard (dev/testing hook)
+        const search0 = GLib.getenv('TG_SEARCH');
+        if (search0)
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 2500, () => {
+                this._openSearch();
+                const dlg = this._searchDlg;
+                if (!dlg)
+                    return GLib.SOURCE_REMOVE;
+                dlg._entry.set_text(search0);
+                const t0 = GLib.get_monotonic_time();
+                GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, () => {
+                    if (!this._searchDlg)          // already closed
+                        return GLib.SOURCE_REMOVE;
+                    if (dlg._hasResults() ||
+                        GLib.get_monotonic_time() - t0 > 25e6)
+                        dlg._submit();
+                    return this._searchDlg ? GLib.SOURCE_CONTINUE
+                                           : GLib.SOURCE_REMOVE;
+                });
+                return GLib.SOURCE_REMOVE;
+            });
     }
 
     /* ── UI construction ──────────────────────────────────────────────── */
@@ -431,6 +463,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         const src = new Gio.Menu();
         src.append('Yahoo Finance', 'win.source::yahoo');
         src.append('Yahoo via relay', 'win.source::yahoo-relay');
+        src.append('Nasdaq (US stocks)', 'win.source::nasdaq');
         src.append('Demo (offline)', 'win.source::demo');
         menu.append_section('Data source', src);
 
@@ -573,9 +606,10 @@ class TickerWindow extends Adw.ApplicationWindow {
         return parseWatchlists(this._settings.get_string('watchlists'));
     }
 
-    _activeList() {
+    // lists may be passed in so caller and helper share ONE parsed copy —
+    // pushing into a second parse and writing the first silently lost adds
+    _activeList(lists = this._lists()) {
         const id = this._settings.get_string('active-watchlist');
-        const lists = this._lists();
         return lists.find(w => w.id === id) ?? lists[0];
     }
 
@@ -716,22 +750,24 @@ class TickerWindow extends Adw.ApplicationWindow {
     }
 
     _addSymbol(symbol) {
+        // picking a search result (or Enter in the search entry) makes it
+        // the main panel's subject: add to the active list when new, then
+        // always jump the hero to it
         const lists = this._lists();
-        const wl = this._activeList();
+        const wl = this._activeList(lists);
         if (!wl)
             return;
-        if (wl.symbols.includes(symbol)) {
-            this._toast(`${symbol} is already in ${wl.name}`);
-            return;
+        if (!wl.symbols.includes(symbol)) {
+            wl.symbols.push(symbol);
+            this._writeLists(lists);
+            this._toast(`${symbol} added to ${wl.name}`);
         }
-        wl.symbols.push(symbol);
-        this._writeLists(lists);
-        this._toast(`${symbol} added to ${wl.name}`);
+        this._selectSymbol(symbol);
     }
 
     _removeSymbol(symbol) {
         const lists = this._lists();
-        const wl = this._activeList();
+        const wl = this._activeList(lists);
         if (!wl)
             return;
         wl.symbols = wl.symbols.filter(s => s !== symbol);
@@ -778,7 +814,9 @@ class TickerWindow extends Adw.ApplicationWindow {
 
         let seq = 0;
         let pending = 0;
+        let lastRes = [];        // latest search results (for Enter)
         const populate = (items) => {
+            lastRes = items;
             for (let r = results.get_first_child(); r;) {
                 const next = r.get_next_sibling();
                 results.remove(r);
@@ -820,10 +858,35 @@ class TickerWindow extends Adw.ApplicationWindow {
                 return GLib.SOURCE_REMOVE;
             });
         });
-        entry.connect('entry-activated', () => {
-            const sym = entry.get_text().trim().toUpperCase();
-            if (sym) { this._addSymbol(sym); dlg.force_close(); }
+        // Enter submits from anywhere in the dialog (entry, results list,
+        // or nowhere) — a plain entry-activated signal proved unreliable
+        // once result rows existed
+        const pickTop = () => {
+            const typed = entry.get_text().trim().toUpperCase();
+            // Enter accepts the top search result (typing "netflix" should
+            // pick NFLX, not register a NETFLIX ticker); raw text is the
+            // fallback for symbols the catalog didn't return
+            const pick = lastRes.find(
+                r => r.name !== 'Add this symbol directly')?.symbol ?? typed;
+            if (!pick)
+                return false;
+            this._addSymbol(pick);
+            dlg.force_close();
+            return true;
+        };
+        // hooks for the TG_SEARCH smoke test (see constructor)
+        dlg._entry = entry;
+        dlg._submit = pickTop;
+        dlg._hasResults = () =>
+            lastRes.some(r => r.name !== 'Add this symbol directly');
+
+        const keys = new Gtk.EventControllerKey({
+            propagation_phase: Gtk.PropagationPhase.CAPTURE,
         });
+        keys.connect('key-pressed', (c, kv) =>
+            (kv === Gtk.KEY_Return || kv === Gtk.KEY_KP_Enter)
+                ? pickTop() : false);
+        dlg.add_controller(keys);
 
         dlg.present(this);
     }
@@ -1001,8 +1064,7 @@ class TickerWindow extends Adw.ApplicationWindow {
                 if (this._hist?.symbol !== this._hero())
                     this._loadHistory();
                 this._setStatus(
-                    `${this._settings.get_string('data-source') === 'demo'
-                        ? 'Demo feed' : 'Yahoo Finance'} · updated ` +
+                    `${sourceLabel(this._settings.get_string('data-source'))} · updated ` +
                     new Date(this._atWall * 1000)
                         .toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}));
                 if (manual)
@@ -1218,8 +1280,9 @@ class TickerWindow extends Adw.ApplicationWindow {
 
     _updateHero() {
         const sym = this._hero();
-        const q = this._quotes.find(x => x.symbol === sym) ??
-                  this._quotes[0];
+        // no fallback to quotes[0]: painting another ticker's price under
+        // the new hero symbol would lie until the refresh lands
+        const q = this._quotes.find(x => x.symbol === sym);
         const hist = this._hist;
         this._title.set_title(this._activeList()?.name ?? 'TickerGlass');
         this._title.set_subtitle(sym ?? '');
@@ -1336,9 +1399,10 @@ class TickerWindow extends Adw.ApplicationWindow {
             title: 'Data source',
             model: new Gtk.StringList({strings: ['Yahoo Finance',
                                                  'Yahoo via relay',
+                                                 'Nasdaq (US stocks & ETFs)',
                                                  'Demo (offline)']}),
         });
-        const srcIds = ['yahoo', 'yahoo-relay', 'demo'];
+        const srcIds = ['yahoo', 'yahoo-relay', 'nasdaq', 'demo'];
         src.set_selected(Math.max(0, srcIds.indexOf(
             this._settings.get_string('data-source'))));
         src.connect('notify::selected', () => this._settings.set_string(
@@ -1381,7 +1445,8 @@ class TickerWindow extends Adw.ApplicationWindow {
             developer_name: 'vijaybala',
             website: 'https://vijaybala.dev',
             license_type: Gtk.License.GPL_2_0,
-            comments: 'Sparkline market watch — quotes by Yahoo Finance. ' +
+            comments: 'Sparkline market watch — quotes by Yahoo Finance ' +
+                'or Nasdaq. ' +
                       'Pairs live with the GNOME Shell extension of the ' +
                       'same name through a shared gsettings schema.',
         });

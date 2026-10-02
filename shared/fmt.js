@@ -31,7 +31,7 @@ const INTERVAL_MAX_DAYS = {
 
 export const INTERVALS = Object.keys(INTERVAL_MAX_DAYS);
 
-const RANGE_DAYS = {
+export const RANGE_DAYS = {
     '1d': 1, '7d': 7, '1mo': 30, '52w': 365, ytd: 300,
     '1y': 365, '2y': 730, '5y': 1825,
     /* legacy values that may still live in user dconf */

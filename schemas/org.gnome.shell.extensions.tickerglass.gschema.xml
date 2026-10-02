@@ -30,10 +30,11 @@
       <choices>
         <choice value='yahoo'/>
         <choice value='yahoo-relay'/>
+        <choice value='nasdaq'/>
         <choice value='demo'/>
       </choices>
       <summary>Data source</summary>
-      <description>'yahoo' hits finance.yahoo.com directly; 'yahoo-relay' routes the same requests through a public fetch proxy when your network is rate-limited; 'demo' generates plausible offline data</description>
+      <description>'yahoo' hits finance.yahoo.com directly; 'yahoo-relay' routes the same requests through a public fetch proxy when your network is rate-limited; 'nasdaq' uses Nasdaq's keyless site API for US stocks/ETFs (crypto, indices and news ride the relay); 'demo' generates plausible offline data</description>
     </key>
     <key name="refresh-seconds" type="i">
       <default>60</default>

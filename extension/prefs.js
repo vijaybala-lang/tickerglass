@@ -260,9 +260,10 @@ export default class TickerGlassPrefs extends ExtensionPreferences {
                         'plausible offline data'),
             model: new Gtk.StringList({
                 strings: ['Yahoo Finance', _('Yahoo via relay'),
+                          _('Nasdaq (US stocks & ETFs)'),
                           _('Demo (offline)')]}),
         });
-        const srcIds = ['yahoo', 'yahoo-relay', 'demo'];
+        const srcIds = ['yahoo', 'yahoo-relay', 'nasdaq', 'demo'];
         srcRow.selected = Math.max(0, srcIds.indexOf(
             settings.get_string('data-source')));
         srcRow.connect('notify::selected', () =>
