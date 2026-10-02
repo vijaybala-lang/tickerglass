@@ -24,6 +24,19 @@
       <summary>Active watchlist id</summary>
     </key>
 
+    <!-- what the hero pill shows next to the (always visible) price:
+         the dollar move or the percentage move for the visible chart
+         range (click the pill to flip) -->
+    <key name="change-style" type="s">
+      <default>'dollars'</default>
+      <choices>
+        <choice value='dollars'/>
+        <choice value='pct'/>
+      </choices>
+      <summary>Change display style</summary>
+      <description>'dollars' shows the absolute move, 'pct' the percentage over the visible range</description>
+    </key>
+
     <!-- ── data ────────────────────────────────────────────────────────── -->
     <key name="data-source" type="s">
       <default>'yahoo'</default>

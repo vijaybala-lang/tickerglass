@@ -346,7 +346,8 @@ class TickerIndicator extends PanelMenu.Button {
         this._chgLbl.visible = showChg && q?.change != null;
         this._chgLbl.add_style_class_name(dirCls);
         if (q?.change != null)
-            this._chgLbl.set_text(fmtPct(q.changePct));
+            this._chgLbl.set_text(
+                `${q.changePct >= 0 ? '▲' : '▼'} ${fmtPct(q.changePct)}`);
     }
 
     _startTicker() {

@@ -22,8 +22,12 @@ window { font-family: Inter, Cantarell, sans-serif; }
                margin-top: 6px; }
 .tg-read-title { font-weight: 700; font-size: 1.05em; opacity: 0.9;
                  margin-left: 4px; }
-.tg-hero-price { font-weight: 300; font-size: 2.5em;
+.tg-hero-price { font-weight: 300; font-size: 28px;
                  letter-spacing: -0.025em; }
+/* ticker identity leads the page at 40px (user spec); the symbol badge
+ * rides directly underneath */
+.tg-hero-name { font-size: 40px; font-weight: 700;
+                letter-spacing: -0.02em; }
 .tg-hero-price.tg-up   { color: @success-color; }
 .tg-hero-price.tg-down { color: @error-color; }
 .tg-up   { color: @success-color; }
@@ -34,6 +38,14 @@ window { font-family: Inter, Cantarell, sans-serif; }
   font-weight: 700;
   padding: 3px 13px;
   border-radius: 99px;
+}
+/* hero change pill a step under the name, baseline-aligned with it —
+ * tighter vertical padding so the tinted slab hugs the text */
+.tg-hero-pct {
+  font-size: 28px;
+  font-weight: 500;
+  padding: 2px 14px;
+  border-radius: 14px;
 }
 .tg-up-soft {
   background-color: alpha(@success-color, 0.14);

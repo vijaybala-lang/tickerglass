@@ -172,21 +172,6 @@ class TickerWindow extends Adw.ApplicationWindow {
     /* ── UI construction ──────────────────────────────────────────────── */
 
     _buildUi() {
-        // header identity, Robinhood-style: the company name leads big and
-        // bold, the symbol rides along as a quiet badge; left justified
-        this._heroSym = new Gtk.Label({label: '', css_classes: ['tg-win-sym']});
-        this._heroName = new Gtk.Label({
-            label: '', css_classes: ['tg-win-name'],
-            ellipsize: 3, max_width_chars: 38,
-        });
-        this._tickerTitle = new Gtk.Box({
-            orientation: Gtk.Orientation.HORIZONTAL, spacing: 10,
-            valign: Gtk.Align.CENTER, halign: Gtk.Align.START,
-            hexpand: true, margin_start: 6,
-        });
-        this._tickerTitle.append(this._heroName);
-        this._tickerTitle.append(this._heroSym);
-
         const hbar = new Adw.HeaderBar();
         // Adw.HeaderBar paints the window title centered when its title
         // slot is untouched — feed it an empty box to evict the app name
@@ -195,9 +180,6 @@ class TickerWindow extends Adw.ApplicationWindow {
         const sideBtn = new Gtk.ToggleButton({icon_name: 'sidebar-show-symbolic',
                                               tooltip_text: 'Watchlists (F9)'});
         hbar.pack_start(sideBtn);
-        // identity is a start-packed item, not title_widget: libadwaita
-        // forces the title slot centered; packed items sit flush left
-        hbar.pack_start(this._tickerTitle);
         this._readTitle = new Gtk.Label({
             label: '', ellipsize: 3, max_width_chars: 45,
             valign: Gtk.Align.CENTER, css_classes: ['tg-read-title'],
@@ -217,7 +199,7 @@ class TickerWindow extends Adw.ApplicationWindow {
 
         // reading mode replaces the ticker chrome entirely (back pill,
         // article title, open-externally) — toggled per visible page below
-        this._readBack = new Gtk.Button({label: '← Ticker',
+        this._readBack = new Gtk.Button({label: '← Back',
                                          valign: Gtk.Align.CENTER});
         this._readBack.add_css_class('tg-chip');
         this._readBack.connect('clicked', () => this._leaveReader());
@@ -250,14 +232,42 @@ class TickerWindow extends Adw.ApplicationWindow {
                                      spacing: 2});
         const heroTop = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
                                      spacing: 12});
-        // identity moved to the header; the page leads with the price
-        this._heroPrice = new Gtk.Label({label: '', css_classes: ['tg-hero-price']});
-        this._heroPill = new Gtk.Label({label: '', css_classes: ['tg-pill']});
+        // ONE row holds the big text: name (40px) left, price + pct (34px)
+        // right — same row means the shorter labels sit optically centered
+        // against the NAME alone; the symbol badge gets its own line below
+        this._heroName = new Gtk.Label({
+            label: '', css_classes: ['tg-hero-name'],
+            ellipsize: 3, max_width_chars: 20,
+            hexpand: true, xalign: 0,
+        });
+        // price is the anchor, always shown; the pill beside it flips
+        // between the dollar move and the percentage move on click
+        // (persisted in gsettings as change-style)
+        this._heroMode = this._settings.get_string('change-style')
+            || 'dollars';
+        this._heroPrice = new Gtk.Label({
+            label: '', css_classes: ['tg-hero-price'],
+        });
+        this._heroPill = new Gtk.Label({
+            label: '', css_classes: ['tg-pill', 'tg-hero-pct'],
+            tooltip_text: 'Click to switch between $ and %',
+        });
+        {
+            const gc = new Gtk.GestureClick();
+            gc.connect('pressed', () => this._flipHeroValue());
+            this._heroPill.add_controller(gc);
+            try {
+                this._heroPill.set_cursor(
+                    Gdk.Cursor.new_from_name('pointer', null));
+            } catch (e) { /* cursor is polish */ }
+        }
+        this._heroSym = new Gtk.Label({
+            label: '', css_classes: ['tg-win-sym'],
+            halign: Gtk.Align.START,
+        });
+        heroTop.append(this._heroName);
         heroTop.append(this._heroPrice);
         heroTop.append(this._heroPill);
-        heroTop.append(new Gtk.Box());     // spacer
-        const spacer = heroTop.get_last_child();
-        spacer.set_hexpand(true);
         // shown only while the hero is a search-preview not yet in the
         // list — a fat pill (icon + words) so it's an easy target
         this._addBtn = new Gtk.Button({valign: Gtk.Align.CENTER});
@@ -272,6 +282,14 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._addBtn.connect('clicked', () => this._addSymbol(this._hero()));
         heroTop.append(this._addBtn);
         this._heroBox.append(heroTop);
+        // badge line: directly under the name, left-flush
+        {
+            const symRow = new Gtk.Box({
+                orientation: Gtk.Orientation.HORIZONTAL,
+            });
+            symRow.append(this._heroSym);
+            this._heroBox.append(symRow);
+        }
         this._chips = new Adw.WrapBox({margin_top: 4, line_spacing: 8,
                                        child_spacing: 8});
         this._heroBox.append(this._chips);
@@ -422,7 +440,8 @@ class TickerWindow extends Adw.ApplicationWindow {
                 this._searchPop?.popdown();
             this._readBack.set_visible(reading);
             this._readExt.set_visible(reading);
-            this._tickerTitle.set_visible(!reading);
+            // hero identity lives on the chart page now — the stack swap
+            // already hides it while reading; nothing to toggle here
             this._readTitle.set_visible(reading);
         });
 
@@ -1873,6 +1892,12 @@ class TickerWindow extends Adw.ApplicationWindow {
                            : '');
     }
 
+    _flipHeroValue() {
+        this._heroMode = this._heroMode === 'pct' ? 'dollars' : 'pct';
+        this._settings.set_string('change-style', this._heroMode);
+        this._updateHero();
+    }
+
     _updateHero() {
         const sym = this._hero();
         // no fallback to quotes[0]: painting another ticker's price under
@@ -1922,11 +1947,18 @@ class TickerWindow extends Adw.ApplicationWindow {
             }
         }
         const up = (chg ?? 0) >= 0;
-        this._heroPill.set_css_classes(['tg-pill',
+        // price always shows; the pill carries either the dollar move or
+        // the percentage move for the visible range (change-style)
+        const showPct = this._heroMode === 'pct';
+        this._heroPrice.set_visible(q.price != null);
+        this._heroPill.set_visible(chg != null);
+        this._heroPill.set_css_classes(['tg-pill', 'tg-hero-pct',
                                         up ? 'tg-up-soft' : 'tg-down-soft']);
         this._heroPill.set_label(chg != null
-            ? `${up ? '▲' : '▼'} ${fmtDelta(chg, q.currency)}  ${
-                fmtPct(pct)}${tag ? ` · ${tag}` : ''}` : '');
+            ? `${up ? '▲' : '▼'} ${showPct
+                ? fmtPct(pct) : fmtDelta(chg, q.currency)}${
+                tag ? ` · ${tag}` : ''}`
+            : '');
         this._heroPrice.set_css_classes(['tg-hero-price',
                                          chg != null ? (up ? 'tg-up' : 'tg-down') : '']);
 
@@ -2105,6 +2137,12 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._rebuildSidebar();
             this._refresh(true);
             this._loadHistory();
+            break;
+        case 'change-style':
+            // external flips (prefs dialog, other window) re-sync mode
+            this._heroMode = this._settings.get_string('change-style')
+                || 'dollars';
+            this._updateHero();
             break;
         case 'selected-symbol':
             this._updateHero();

@@ -104,20 +104,20 @@ export function fmtCompact(v) {
     return f ? f.format(v) : String(v);
 }
 
-/** ± signed price delta. */
+/** Price delta, unsigned: every surface pairs it with a ▲/▼ arrow
+ * (or up/down color), so the old +/− prefix was pure noise. */
 export function fmtDelta(v, currency = 'USD') {
     if (!Number.isFinite(v))
         return '—';
-    const s = fmtPrice(Math.abs(v), currency);
-    return `${v >= 0 ? '+' : '−'}${s}`;
+    return fmtPrice(Math.abs(v), currency);
 }
 
-/** +1.24% style, sign always shown, 2 significant decimals. */
+/** 1.24% style, sign-free — direction lives in the arrow/color. */
 export function fmtPct(x) {
     if (!Number.isFinite(x))
         return '—';
     const v = (x * 100).toFixed(Math.abs(x) < 0.001 ? 3 : 2);
-    return `${x >= 0 ? '+' : '−'}${Math.abs(+v).toFixed(v.includes('.') ? v.split('.')[1].length : 2)}%`;
+    return `${Math.abs(+v).toFixed(v.includes('.') ? v.split('.')[1].length : 2)}%`;
 }
 
 /** Epoch + IANA zone → "09:30" / "Mar 4". Intl gives us the zone math. */

@@ -316,7 +316,8 @@ export class TickerPanel {
             this._heroPill.remove_style_class_name('tg-pill-down');
             this._heroPill.add_style_class_name(up ? 'tg-pill-up' : 'tg-pill-down');
             this._heroPill.set_text(hero.change != null
-                ? `${fmtDelta(hero.change, hero.currency)}  ${fmtPct(hero.changePct)}`
+                ? `${up ? '▲' : '▼'} ${fmtDelta(hero.change, hero.currency)}` +
+                  `  ${fmtPct(hero.changePct)}`
                 : '');
             const st = stateIcon[hero.state] ?? stateIcon.CLOSED;
             this._statusLbl.set_text(
@@ -373,7 +374,7 @@ export class TickerPanel {
                 x_align: Clutter.ActorAlign.END}));
             if (q.change != null) {
                 const pl = new St.Label({
-                    text: fmtPct(q.changePct),
+                    text: `${q.change >= 0 ? '▲' : '▼'} ${fmtPct(q.changePct)}`,
                     style_class: 'tg-row-chg ' +
                         (q.change >= 0 ? 'tg-up' : 'tg-down'),
                     x_align: Clutter.ActorAlign.END});
