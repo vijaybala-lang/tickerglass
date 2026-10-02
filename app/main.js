@@ -42,7 +42,7 @@ class TickerGlassApp extends Adw.Application {
         this.set_accels_for_action('win.refresh', ['F5', 'r']);
         this.set_accels_for_action('win.search', ['<Primary>f', 'slash']);
         this.set_accels_for_action('win.sidebar', ['F9']);
-        this.set_accels_for_action('win.search', ['/']);
+        this.set_accels_for_action('win.search', ['slash', '<Primary>f']);
         this.set_accels_for_action('win.newlist', ['<Primary>n']);
         this.set_accels_for_action('win.prefs', ['<Primary>comma']);
     }

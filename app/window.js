@@ -125,11 +125,15 @@ class TickerWindow extends Adw.ApplicationWindow {
         if (reader0)
             this._openReader(reader0, 'Reader smoke test');
         // TG_SEARCH=netflix opens the search dialog, types the query, and
-        // hits Enter once results land — exercises the full add-and-jump
-        // path without a physical keyboard (dev/testing hook)
+        // picks the top result — via a synthesized row click when TG_CLICK
+        // is set, else via Enter — exercising the full add-and-jump paths
+        // without a physical keyboard (dev/testing hook)
         const search0 = GLib.getenv('TG_SEARCH');
+        const useClick = GLib.getenv('TG_CLICK');
         if (search0)
             GLib.timeout_add(GLib.PRIORITY_DEFAULT, 2500, () => {
+                log(`TickerGlass: TG_SEARCH opening dialog (${search0}, ` +
+                    `click-mode=${useClick ? 'y' : 'n'})`);
                 this._openSearch();
                 const dlg = this._searchDlg;
                 if (!dlg)
@@ -140,8 +144,12 @@ class TickerWindow extends Adw.ApplicationWindow {
                     if (!this._searchDlg)          // already closed
                         return GLib.SOURCE_REMOVE;
                     if (dlg._hasResults() ||
-                        GLib.get_monotonic_time() - t0 > 25e6)
-                        dlg._submit();
+                        GLib.get_monotonic_time() - t0 > 25e6) {
+                        if (useClick)
+                            dlg._clickFirst();
+                        else
+                            dlg._submit();
+                    }
                     return this._searchDlg ? GLib.SOURCE_CONTINUE
                                            : GLib.SOURCE_REMOVE;
                 });
@@ -755,6 +763,8 @@ class TickerWindow extends Adw.ApplicationWindow {
         // always jump the hero to it
         const lists = this._lists();
         const wl = this._activeList(lists);
+        log(`TickerGlass: _addSymbol ${symbol} wl=${wl?.id} ` +
+            `have=${wl?.symbols?.includes(symbol)}`);
         if (!wl)
             return;
         if (!wl.symbols.includes(symbol)) {
@@ -799,6 +809,9 @@ class TickerWindow extends Adw.ApplicationWindow {
         const results = new Gtk.ListBox();
         results.add_css_class('boxed-list');
         results.set_vexpand(true);
+        // GTK's default (single click only selects, double activates) feels
+        // broken in a picker — every click should pick
+        results.set_activate_on_single_click(true);
         listScroll.set_child(results);
         box.append(listScroll);
 
@@ -831,8 +844,18 @@ class TickerWindow extends Adw.ApplicationWindow {
                     css_classes: ['dim-label', 'caption'],
                     valign: Gtk.Align.CENTER,
                 }));
-                row._add = () => { this._addSymbol(it.symbol); dlg.force_close(); };
+                row._add = () => {
+                    log(`TickerGlass: search row picked ${it.symbol}`);
+                    this._addSymbol(it.symbol);
+                    dlg.force_close();
+                };
                 row.connect('activated', row._add);
+                // fire on a real mouse release directly — never depends on
+                // GtkListBox activate-on-single-click semantics or on
+                // AdwActionRow relaying the list's row-activated signal
+                const click = new Gtk.GestureClick();
+                click.connect('clicked', () => row._add());
+                row.add_controller(click);
                 results.append(row);
             }
         };
@@ -879,6 +902,14 @@ class TickerWindow extends Adw.ApplicationWindow {
         dlg._submit = pickTop;
         dlg._hasResults = () =>
             lastRes.some(r => r.name !== 'Add this symbol directly');
+        dlg._clickFirst = () => {
+            // replay what a mouse click on the top row does: the listbox's
+            // row-activated signal is what Adw.ActionRow::activated rides
+            const r = results.get_row_at_index(0);
+            log(`TickerGlass: TG_CLICK top row title=${r?.title}`);
+            if (r)
+                results.emit('row-activated', r);
+        };
 
         const keys = new Gtk.EventControllerKey({
             propagation_phase: Gtk.PropagationPhase.CAPTURE,
@@ -1031,8 +1062,12 @@ class TickerWindow extends Adw.ApplicationWindow {
     }
 
     _refresh(manual = false) {
-        if (this._busy)
+        if (this._busy) {
+            // don't drop the request: an add/remove landing mid-fetch must
+            // still repaint once the in-flight round ends
+            this._queued = true;
             return;
+        }
         const syms = this._activeList()?.symbols ?? [];
         if (!syms.length) {
             this._quotes = [];
@@ -1069,6 +1104,7 @@ class TickerWindow extends Adw.ApplicationWindow {
                         .toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}));
                 if (manual)
                     this._toast('Quotes refreshed');
+                this._drainRefresh();
             })
             .catch(e => {
                 if (this._dead)
@@ -1077,7 +1113,15 @@ class TickerWindow extends Adw.ApplicationWindow {
                 this._busy = false;
                 this._spinner.set_visible(false);
                 this._setStatus(`Fetch failed: ${e.message}`);
+                this._drainRefresh();
             });
+    }
+
+    _drainRefresh() {
+        if (this._queued && !this._busy && !this._dead) {
+            this._queued = false;
+            this._refresh();
+        }
     }
 
     async _loadHistory() {
