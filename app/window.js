@@ -211,6 +211,13 @@ class TickerWindow extends Adw.ApplicationWindow {
         heroTop.append(new Gtk.Box());     // spacer
         const spacer = heroTop.get_last_child();
         spacer.set_hexpand(true);
+        // shown only while the hero is a search-preview not yet in the list
+        this._addBtn = new Gtk.Button({label: '+ Watchlist',
+                                       valign: Gtk.Align.CENTER});
+        this._addBtn.add_css_class('tg-chip');
+        this._addBtn.set_visible(false);
+        this._addBtn.connect('clicked', () => this._addSymbol(this._hero()));
+        heroTop.append(this._addBtn);
         heroTop.append(this._heroPill);
         heroTop.append(this._heroPrice);
         this._heroBox.append(heroTop);
@@ -758,9 +765,8 @@ class TickerWindow extends Adw.ApplicationWindow {
     }
 
     _addSymbol(symbol) {
-        // picking a search result (or Enter in the search entry) makes it
-        // the main panel's subject: add to the active list when new, then
-        // always jump the hero to it
+        // the hero's “+ Watchlist” button (and nothing else) commits a
+        // previewed symbol to the active list
         const lists = this._lists();
         const wl = this._activeList(lists);
         log(`TickerGlass: _addSymbol ${symbol} wl=${wl?.id} ` +
@@ -772,7 +778,14 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._writeLists(lists);
             this._toast(`${symbol} added to ${wl.name}`);
         }
+        if (this._preview?.sym === symbol) {
+            this._preview = null;     // real now; the button hides itself
+            this._previewQ = null;
+        }
+        const was = this._settings.get_string('selected-symbol');
         this._selectSymbol(symbol);
+        if (was === symbol)
+            this._updateHero();
     }
 
     _removeSymbol(symbol) {
@@ -851,7 +864,8 @@ class TickerWindow extends Adw.ApplicationWindow {
                 }));
                 row._add = () => {
                     log(`TickerGlass: search row picked ${it.symbol}`);
-                    this._addSymbol(it.symbol);
+                    // look first, persist only via the hero's + Watchlist
+                    this._showSymbol(it.symbol, it);
                     dlg.force_close();
                 };
                 row.connect('activated', row._add);
@@ -913,7 +927,7 @@ class TickerWindow extends Adw.ApplicationWindow {
             const pick = lastRes.find(isPickable)?.symbol ?? typed;
             if (!pick)
                 return false;
-            this._addSymbol(pick);
+            this._showSymbol(pick, lastRes.find(isPickable) ?? {});
             dlg.force_close();
             return true;
         };
@@ -1020,8 +1034,10 @@ class TickerWindow extends Adw.ApplicationWindow {
         const cfg = this._columnsSetting();
         const prop = SORT_PROP[cfg.sort] ?? 'sym';
         const numeric = prop.endsWith('-n');
+        const active = this._activeList()?.symbols ?? [];
         const sorted = [...this._quotes]
-            .filter(q => q.price != null || q.error)
+            .filter(q => active.includes(q.symbol) &&
+                (q.price != null || q.error))
             .map(q => ({q, item: new QuoteItem(q)}))
             .sort((a, b) => {
                 const va = a.item[camel(prop)];
@@ -1069,9 +1085,37 @@ class TickerWindow extends Adw.ApplicationWindow {
     /* ── data flow ────────────────────────────────────────────────────── */
 
     _hero() {
+        // a previewed symbol (search-selected, not added to the list)
+        // stays the hero until the user adds it or moves on
         const sel = this._settings.get_string('selected-symbol');
         const syms = this._activeList()?.symbols ?? [];
-        return syms.includes(sel) ? sel : (syms[0] ?? '');
+        if (sel && (sel === this._preview?.sym || syms.includes(sel)))
+            return sel;
+        return syms[0] ?? '';
+    }
+
+    isPreview() {
+        const sym = this._hero();
+        return !!this._preview && this._preview.sym === sym &&
+            !(this._activeList()?.symbols ?? []).includes(sym);
+    }
+
+    /* make `symbol` the hero WITHOUT touching the watchlist; `info` is the
+     * catalog row ({name, exchange}) so the hero paints a name instantly */
+    _showSymbol(symbol, info = {}) {
+        const inList =
+            (this._activeList()?.symbols ?? []).includes(symbol);
+        this._preview = inList ? null
+            : {sym: symbol, name: info.name ?? '',
+               exchange: info.exchange ?? ''};
+        this._previewQ = null;
+        const was = this._settings.get_string('selected-symbol');
+        this._selectSymbol(symbol);
+        if (was === symbol) {        // no settings-change signal will come
+            this._updateHero();
+            this._loadHistory();
+            this._loadNews(symbol);
+        }
     }
 
     _selectSymbol(sym) {
@@ -1097,7 +1141,11 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._spinner.set_visible(false);
         }
         const syms = this._activeList()?.symbols ?? [];
-        if (!syms.length) {
+        // a previewed hero gets its own quote too, so the panel keeps
+        // ticking while it's just on loan from the search results
+        const prev = this._preview?.sym && !syms.includes(this._preview.sym)
+            ? [this._preview.sym] : [];
+        if (!syms.length && !prev.length) {
             this._quotes = [];
             this._refreshTable();
             this._updateHero();
@@ -1112,7 +1160,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._busy = true;
         this._busySince = GLib.get_monotonic_time() / 1e6;
         this._spinner.set_visible(true);
-        this._client.quotes(syms, {sparkRange: '1mo'})
+        this._client.quotes([...syms, ...prev], {sparkRange: '1mo'})
             .then(res => {
                 if (this._dead)
                     return;
@@ -1167,12 +1215,46 @@ class TickerWindow extends Adw.ApplicationWindow {
                 this._settings.get_string('chart-range') !== range)
                 return;
             this._hist = hist;
+            // a previewed symbol has no watchlist quote row yet; borrow
+            // the history's meta so price/chips/pill still paint
+            if (this.isPreview() &&
+                !this._quotes.find(x => x.symbol === sym)) {
+                const m = hist.meta ?? {};
+                const chg = m.price != null && m.prevClose != null
+                    ? m.price - m.prevClose : null;
+                // changePct is a FRACTION app-wide (fmtPct multiplies by
+                // 100); and a borrowed change can be garbage (Nasdaq's
+                // fallback daily row vs last-sale can be weeks apart) —
+                // never paint a percent the quote can't back up
+                const pct = chg != null && m.prevClose
+                    ? chg / m.prevClose : null;
+                const sane = pct == null || Math.abs(pct) <= 0.6;
+                this._previewQ = {
+                    symbol: sym, name: this._preview?.name || sym,
+                    price: m.price, prevClose: sane ? m.prevClose : null,
+                    currency: m.currency ?? 'USD', state: m.state ?? '',
+                    exchange: m.exchange ?? '', volume: m.volume,
+                    change: sane ? chg : null,
+                    changePct: sane ? pct : null,
+                    spark: null, error: null,
+                };
+            }
             this._startDrawIn();
             this._ivBtn.set_label(INTERVAL_LABEL[hist.interval] ?? hist.interval);
             this._updateHero();
         } catch (e) {
             logError(e, 'TickerGlass app');
             if (!this._dead && this._hero() === sym) {
+                if (this.isPreview()) {
+                    // nothing answers for this symbol: drop the preview,
+                    // say so, and hand the hero back to the list
+                    this._preview = null;
+                    this._previewQ = null;
+                    this._toast(`No market data for ${sym}`);
+                    this._selectSymbol(
+                        this._activeList()?.symbols?.[0] ?? '');
+                    return;
+                }
                 this._hist = null;
                 this._chart.queue_draw();
             }
@@ -1357,8 +1439,12 @@ class TickerWindow extends Adw.ApplicationWindow {
         const sym = this._hero();
         // no fallback to quotes[0]: painting another ticker's price under
         // the new hero symbol would lie until the refresh lands
-        const q = this._quotes.find(x => x.symbol === sym);
+        const q = this._quotes.find(x => x.symbol === sym)
+            ?? (this._previewQ?.symbol === sym ? this._previewQ : null);
         const hist = this._hist;
+        this._addBtn.set_visible(this.isPreview());
+        this._addBtn.set_tooltip_text(
+            `Add ${sym} to “${this._activeList()?.name ?? 'Watchlist'}”`);
         this._title.set_title(this._activeList()?.name ?? 'TickerGlass');
         this._title.set_subtitle(sym ?? '');
         if (sym !== this._newsFor) {
@@ -1377,8 +1463,11 @@ class TickerWindow extends Adw.ApplicationWindow {
             INTERVAL_LABEL[hist?.interval] ?? 'Auto');
 
         if (!q) {
+            const p = this.isPreview() ? this._preview : null;
             this._heroSym.set_label(sym || '—');
-            this._heroName.set_label('');
+            this._heroName.set_label(p
+                ? [p.name && p.name !== sym ? p.name : '', p.exchange]
+                    .filter(Boolean).join(' · ') : '');
             this._heroPrice.set_label('');
             this._heroPill.set_label('');
             renderChips(this._chips, []);
