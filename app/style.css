@@ -70,6 +70,21 @@ window { font-family: Inter, Cantarell, sans-serif; }
   border: 1px solid alpha(currentcolor, 0.10);
 }
 
+/* the preview's commit button: filled green pill, generous hit target */
+.tg-add {
+  background: @success-color;
+  color: @accent_fg_color;
+  border: none;
+  border-radius: 99px;
+  padding: 8px 20px;
+  font-weight: 700;
+  min-height: 0;
+  box-shadow: none;
+}
+.tg-add:hover { background: alpha(@success-color, 0.82); }
+.tg-add:active { background: alpha(@success-color, 0.65); }
+.tg-add image, .tg-add label { color: inherit; }
+
 /* chart card */
 .tg-chart-area { border-radius: 16px; }
 

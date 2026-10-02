@@ -245,10 +245,16 @@ class TickerWindow extends Adw.ApplicationWindow {
         heroTop.append(new Gtk.Box());     // spacer
         const spacer = heroTop.get_last_child();
         spacer.set_hexpand(true);
-        // shown only while the hero is a search-preview not yet in the list
-        this._addBtn = new Gtk.Button({label: '+ Watchlist',
-                                       valign: Gtk.Align.CENTER});
-        this._addBtn.add_css_class('tg-chip');
+        // shown only while the hero is a search-preview not yet in the
+        // list — a fat pill (icon + words) so it's an easy target
+        this._addBtn = new Gtk.Button({valign: Gtk.Align.CENTER});
+        {
+            const inner = new Gtk.Box({spacing: 8});
+            inner.append(new Gtk.Image({icon_name: 'list-add-symbolic'}));
+            inner.append(new Gtk.Label({label: 'Add to Watchlist'}));
+            this._addBtn.set_child(inner);
+        }
+        this._addBtn.add_css_class('tg-add');
         this._addBtn.set_visible(false);
         this._addBtn.connect('clicked', () => this._addSymbol(this._hero()));
         heroTop.append(this._addBtn);
