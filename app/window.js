@@ -203,7 +203,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         const heroTop = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
                                      spacing: 12});
         this._heroSym = new Gtk.Label({label: '—', css_classes: ['tg-hero-sym']});
-        this._heroName = new Gtk.Label({label: '', css_classes: ['dim-label', 'caption']});
+        this._heroName = new Gtk.Label({label: '', css_classes: ['tg-hero-name']});
         this._heroPrice = new Gtk.Label({label: '', css_classes: ['tg-hero-price']});
         this._heroPill = new Gtk.Label({label: '', css_classes: ['tg-pill']});
         heroTop.append(this._heroSym);
@@ -531,6 +531,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         };
 
         act('refresh', null, () => this._refresh(true));
+        act('readerback', null, () => this._leaveReader());
         act('search', null, () => this._openSearch());
         act('sidebar', null, () =>
             this._split.set_show_sidebar(!this._split.show_sidebar));
@@ -1311,8 +1312,9 @@ class TickerWindow extends Adw.ApplicationWindow {
         }
     }
 
-    /* news reader: in-app WebKit window; falls back to the system browser
-     * when webkitgtk isn't installed on the host */
+    /* news reader: article opens as a page INSIDE the window (stack page
+     * 'reader'); the “← Ticker” pill or Escape returns to the chart.
+     * Falls back to the system browser when webkitgtk isn't installed */
     async _openReader(url, title) {
         try {
             await this._openReaderInner(url, title);
@@ -1323,73 +1325,68 @@ class TickerWindow extends Adw.ApplicationWindow {
     }
 
     async _openReaderInner(url, title) {
-        let WebKit = null;
-        // dynamic gi imports land on .default; try newest WebKitGTK first
-        for (const v of ['6.0', '5.0', '4.1']) {
-            try {
-                const mod = await import(`gi://WebKit?version=${v}`);
-                WebKit = mod.default ?? mod;
-                if (WebKit?.WebView)
-                    break;
-                WebKit = null;
-            } catch { /* next */ }
-        }
-        if (!WebKit) {
-            this._openUrl(url);
-            return;
-        }
-        if (!this._readerWin) {
-            const win = new Adw.Window({
-                transient_for: this,
-                title: title ?? 'Story',
-                default_width: 900,
-                default_height: 700,
+        if (!this._readerWeb) {
+            let WebKit = null;
+            // dynamic gi imports land on .default; try newest WebKitGTK first
+            for (const v of ['6.0', '5.0', '4.1']) {
+                try {
+                    const mod = await import(`gi://WebKit?version=${v}`);
+                    const W = mod.default ?? mod;
+                    if (W?.WebView) {
+                        WebKit = W;
+                        break;
+                    }
+                } catch { /* next */ }
+            }
+            if (!WebKit) {
+                this._openUrl(url);
+                return;
+            }
+            const page = new Gtk.Box({
+                orientation: Gtk.Orientation.VERTICAL, spacing: 8,
+                margin_top: 10, margin_bottom: 6,
+                margin_start: 14, margin_end: 14,
             });
-            const box = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL});
-            const hbar = new Adw.HeaderBar();
-            const back = new Gtk.Button({icon_name: 'go-previous-symbolic',
-                                         sensitive: false, css_classes: ['flat']});
+            const bar = new Gtk.Box({spacing: 8});
+            const back = new Gtk.Button({label: '← Ticker',
+                                         valign: Gtk.Align.CENTER});
+            back.add_css_class('tg-chip');
+            back.connect('clicked', () => this._leaveReader());
+            const t = new Gtk.Label({
+                label: '', ellipsize: 3,    // Pango EllipsizeMode.END
+                hexpand: true, halign: Gtk.Align.START,
+                css_classes: ['dim-label'],
+            });
             const ext = new Gtk.Button({icon_name: 'web-browser-symbolic',
                                         tooltip_text: 'Open in browser'});
             ext.add_css_class('flat');
-            const close = new Gtk.Button({icon_name: 'window-close-symbolic',
-                                          tooltip_text: 'Close'});
-            close.add_css_class('flat');
-            hbar.pack_start(back);
-            hbar.pack_end(close);
-            hbar.pack_end(ext);
+            ext.connect('clicked', () =>
+                this._openUrl(this._readerWeb.get_uri() ?? url));
+            bar.append(back);
+            bar.append(t);
+            bar.append(ext);
             const web = new WebKit.WebView();
             web.set_vexpand(true);
-            back.connect('clicked', () => web.go_back());
-            // this WebKit build lacks can-go-back + item.get_back_list —
-            // track the first committed URI ourselves for back sensitivity
-            const first = {uri: null};
-            web.connect('notify::uri', () => {
-                const u = web.get_uri();
-                if (u && first.uri === null)
-                    first.uri = u;
-                back.set_sensitive(!!u && u !== first.uri);
-            });
-            web.connect('notify::title', () => {
-                const t = web.get_title();
-                if (t)
-                    win.set_title(t);
-            });
-            ext.connect('clicked', () => this._openUrl(web.get_uri() ?? url));
-            close.connect('clicked', () => win.destroy());
-            win.connect('destroy', () => {
-                this._readerWin = null;
-                this._readerWeb = null;
-            });
-            box.append(hbar);
-            box.append(web);
-            win.set_content(box);
-            this._readerWin = win;
+            page.append(bar);
+            page.append(web);
+            // add_titled (not add_child): GJS binds add_child to the
+            // 1-arg GtkWidget method and drops the name. Harmless here —
+            // the Chart/Table toggles are manual buttons, not a ViewSwitcher
+            this._stack.add_titled(page, 'reader', 'Reader');
+            this._readerPage = page;
+            this._readerTitle = t;
             this._readerWeb = web;
         }
+        this._readerTitle.set_text(title ?? '');
         this._readerWeb.load_uri(url);
-        this._readerWin.set_title(title ?? 'Story');
-        this._readerWin.present();
+        this._stack.set_visible_child_name('reader');
+    }
+
+    _leaveReader() {
+        if (this._stack.get_visible_child_name() !== 'reader')
+            return;
+        this._readerWeb?.load_uri('about:blank');   // stop + free the page
+        this._stack.set_visible_child_name('chart');
     }
 
     _startDrawIn() {

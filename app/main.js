@@ -65,6 +65,7 @@ class TickerGlassApp extends Adw.Application {
         sm.connect('notify::dark', syncVariant);
         // shortcuts → window actions
         this.set_accels_for_action('win.refresh', ['F5', 'r']);
+        this.set_accels_for_action('win.readerback', ['Escape']);
         this.set_accels_for_action('win.search', ['<Primary>f', 'slash']);
         this.set_accels_for_action('win.sidebar', ['F9']);
         this.set_accels_for_action('win.search', ['slash', '<Primary>f']);
