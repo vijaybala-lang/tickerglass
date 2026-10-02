@@ -116,7 +116,16 @@ class TickerWindow extends Adw.ApplicationWindow {
 
         this._rebuildTable();
         this._rebuildSidebar();
+        this._t0 = GLib.get_monotonic_time() / 1e6;   // TG_TIMING anchor
         this._refresh();
+        // chart and news don't need the quote round: fire them in
+        // parallel so the hero paints while the slowest quote leg is
+        // still in flight (_histKey dedups against the quotes hook)
+        if (this._hero()) {
+            this._loadHistory();
+            this._newsFor = this._hero();
+            this._loadNews(this._hero());
+        }
         this._restartTimer();
         // TG_VIEW=table|chart forces the initial view (dev/testing hook)
         const view0 = GLib.getenv('TG_VIEW');
@@ -126,6 +135,9 @@ class TickerWindow extends Adw.ApplicationWindow {
         const reader0 = GLib.getenv('TG_READER_URL');
         if (reader0)
             this._openReader(reader0, 'Reader smoke test');
+        // TG_EDIT=1 starts in reorder mode (dev/testing hook)
+        if (GLib.getenv('TG_EDIT'))
+            this._setEdit(true, true);
         // TG_SEARCH=aapl types into the inline search box and picks the
         // top result — via a synthesized row click when TG_CLICK is set,
         // else via Enter — exercising the full preview paths without a
@@ -747,6 +759,32 @@ class TickerWindow extends Adw.ApplicationWindow {
             praw.append(priceL);
             praw.append(pctL);
             box.append(praw);
+            // reorder-mode controls, hidden until a long-press flips
+            // _editOn: ▲▼ move the symbol, ✕ removes it. Buttons eat
+            // their clicks, so row selection is unaffected.
+            const editBox = new Gtk.Box({spacing: 2,
+                                         valign: Gtk.Align.CENTER});
+            editBox.set_visible(false);
+            const mkBtn = (label, tip, cb, down = false) => {
+                const b = new Gtk.Button({label, tooltip_text: tip});
+                b.add_css_class('flat');
+                b.add_css_class('tg-edit-btn');
+                if (down)
+                    b.add_css_class('tg-down');
+                b.connect('clicked', cb);
+                return b;
+            };
+            editBox.append(mkBtn('▲', `Move ${sym} up`,
+                                 () => this._moveSymbol(sym, -1)));
+            editBox.append(mkBtn('▼', `Move ${sym} down`,
+                                 () => this._moveSymbol(sym, 1)));
+            editBox.append(mkBtn('✕', `Remove ${sym} from “${wl.name}”`,
+                                 () => this._removeSymbol(sym), true));
+            box.append(editBox);
+            row._editBox = editBox;
+            const lp = new Gtk.GestureLongPress();
+            lp.connect('pressed', () => this._setEdit(!this._editOn));
+            row.add_controller(lp);
             row.set_child(box);
             row._priceL = priceL;
             row._pctL = pctL;
@@ -755,7 +793,43 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._symRows[sym] = row;
         }
         this._updateWatchRows();
+        this._setEdit(!!this._editOn, true);   // rebuild keeps edit mode
         this._repaintTitle();
+    }
+
+    /* long-press toggle: show/hide the ▲▼✕ controls on every row.
+     * quiet=true re-applies state after a rebuild (no toast repeat). */
+    _setEdit(on, quiet = false) {
+        const was = !!this._editOn;
+        this._editOn = on;
+        for (const row of Object.values(this._symRows ?? {})) {
+            row._editBox?.set_visible(on);
+            // the sparkline is decoration while reordering and eats the
+            // width the symbol label needs next to the buttons
+            row._spark?.set_visible(!on);
+            if (on)
+                row.add_css_class('tg-row-edit');
+            else
+                row.remove_css_class('tg-row-edit');
+        }
+        if (on && !was && !quiet)
+            this._toast('Reorder mode — ▲ ▼ move, ✕ removes. '
+                        + 'Long-press a row again to finish.');
+    }
+
+    /* swap a symbol one step in the active list; the gsettings write
+     * fans out to a sidebar rebuild, which restores edit mode */
+    _moveSymbol(symbol, dir) {
+        const lists = this._lists();
+        const wl = this._activeList(lists);
+        if (!wl)
+            return;
+        const i = wl.symbols.indexOf(symbol);
+        const j = i + dir;
+        if (i < 0 || j < 0 || j >= wl.symbols.length)
+            return;
+        [wl.symbols[i], wl.symbols[j]] = [wl.symbols[j], wl.symbols[i]];
+        this._writeLists(lists);
     }
 
     _quoteOf(sym) {
@@ -1205,10 +1279,16 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._busy = true;
         this._busySince = GLib.get_monotonic_time() / 1e6;
         this._spinner.set_visible(true);
-        this._client.quotes([...syms, ...prev], {sparkRange: '1mo'})
+        this._client.quotes([...syms, ...prev],
+                           {sparkRange: '1mo',
+                            onQuote: q => this._partialQuote(q)})
             .then(res => {
                 if (this._dead)
                     return;
+                if (GLib.getenv('TG_TIMING'))
+                    log(`TG t=${(GLib.get_monotonic_time() / 1e6
+                                  - this._t0).toFixed(1)}s quotes round done`
+                          + ` (${res.quotes.length} symbols)`);
                 this._quotes = res.quotes;
                 this._atWall = Math.floor(GLib.get_real_time() / 1e6);
                 this._busy = false;
@@ -1248,14 +1328,41 @@ class TickerWindow extends Adw.ApplicationWindow {
         }
     }
 
+    /* incremental paint during a quotes round: one row lands, one row
+     * paints — the watchlist shouldn't sit blank while the relay's slow
+     * crypto leg dribbles in. The round's final pass still replaces the
+     * whole set (adding error rows and the back-fetched ones). */
+    _partialQuote(q) {
+        if (this._dead)
+            return;
+        if (GLib.getenv('TG_TIMING'))
+            log(`TG t=${(GLib.get_monotonic_time() / 1e6
+                          - this._t0).toFixed(1)}s quote ${q.symbol}`);
+        const i = this._quotes.findIndex(x => x.symbol === q.symbol);
+        if (i >= 0)
+            this._quotes[i] = q;
+        else
+            this._quotes.push(q);
+        this._refreshTable();
+        this._updateWatchRows();
+        if (q.symbol === this._hero())
+            this._updateHero();
+    }
+
     async _loadHistory() {
         const sym = this._hero();
         if (!sym)
             return;
         const range = this._settings.get_string('chart-range');
+        const iv = this._settings.get_string('chart-interval');
+        // dedup: the boot kick races the quotes-landed hook — two fetches
+        // of the same key would only make each other redundant
+        const key = `${sym}|${range}|${iv}`;
+        if (this._histKey === key)
+            return;
+        this._histKey = key;
         try {
-            const hist = await this._client.history(
-                sym, range, this._settings.get_string('chart-interval'));
+            const hist = await this._client.history(sym, range, iv);
             if (this._dead || this._hero() !== sym ||
                 this._settings.get_string('chart-range') !== range)
                 return;
@@ -1285,10 +1392,16 @@ class TickerWindow extends Adw.ApplicationWindow {
                 };
             }
             this._startDrawIn();
+            if (GLib.getenv('TG_TIMING'))
+                log(`TG t=${(GLib.get_monotonic_time() / 1e6
+                              - this._t0).toFixed(1)}s history ${sym} `
+                      + `${range} (${hist.points.length} pts)`);
             this._ivBtn.set_label(INTERVAL_LABEL[hist.interval] ?? hist.interval);
             this._updateHero();
         } catch (e) {
             logError(e, 'TickerGlass app');
+            if (this._histKey === key)
+                this._histKey = null;      // failed key must be retryable
             if (!this._dead && this._hero() === sym) {
                 if (this.isPreview()) {
                     // nothing answers for this symbol: drop the preview,

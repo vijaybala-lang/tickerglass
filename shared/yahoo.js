@@ -1,8 +1,9 @@
 /* yahoo.js — Yahoo Finance client (no API key), a Nasdaq site-API client
  * (keyless, US stocks/ETFs), and the MarketClient facade that switches
  * between 'yahoo', 'yahoo-relay', 'nasdaq' and 'demo'. Same conventions as
- * weatherglass/weather.js: fresh Soup.Session per request, promise-wrapped
- * send_and_read_async, session.abort() in finally, plain-object results.
+ * weatherglass/weather.js, except the connection story: shared pooled
+ * Soup.Sessions (see sessionFor), promise-wrapped send_and_read_async,
+ * GCancellable per request, plain-object results.
  *
  * Yahoo is picky about cookie-less bots (HTTP 429) and gates its batch
  * endpoints behind a session cookie + "crumb". Strategy:
@@ -16,8 +17,25 @@
 
 import GLib from 'gi://GLib';
 import Soup from 'gi://Soup?version=3.0';
+import Gio from 'gi://Gio';
 import {intervalFor, RANGE_DAYS} from './fmt.js';
 import {DemoClient} from './mock.js';
+
+/* Connection reuse is everything: Soup.Session owns the connection pool,
+ * and a fresh session per request pays a full TLS handshake (150–350ms)
+ * every single call — a 12-symbol boot made ~27 of them. Cache one
+ * session per (UA, timeout) pair and share it across clients and refresh
+ * rounds: keep-alive and HTTP/2 multiplexing finally work for us.
+ * Deadline cancels are per-request (GCancellable), never session.abort(),
+ * which would torch the whole pool over one stalled socket. */
+const SESSIONS = new Map();
+function sessionFor(ua, timeout) {
+    const key = `${ua}|${timeout}`;
+    let s = SESSIONS.get(key);
+    if (!s)
+        SESSIONS.set(key, s = new Soup.Session({user_agent: ua, timeout}));
+    return s;
+}
 
 /* Read a message's HTTP code defensively: some distro builds ship a
  * Soup-3.0 typelib whose get_status() return is annotated as the Status
@@ -101,7 +119,7 @@ export class YahooClient {
             const ua = this._relay
                 ? 'TickerGlass/1.0 (GNOME; tickerglass@vijaybala.dev)'
                 : UA;
-            const session = new Soup.Session({user_agent: ua, timeout: 30});
+            const session = sessionFor(ua, 30);
             const msg = Soup.Message.new('GET',
                 this._relay ? this._relay + url : url);
             if (!msg) {
@@ -116,16 +134,17 @@ export class YahooClient {
             // hard deadline: libsoup's timeout only counts gaps between
             // packets, and a half-dead CGNAT connection can dribble forever
             let done = false;
+            const cancel = new Gio.Cancellable();
             const timer = GLib.timeout_add_seconds(
                 GLib.PRIORITY_DEFAULT, deadline, () => {
                     if (done)
                         return GLib.SOURCE_REMOVE;
                     done = true;
-                    session.abort();
+                    cancel.cancel();      // drops this request, keeps the pool
                     reject(new Error('timeout'));
                     return GLib.SOURCE_REMOVE;
                 });
-            session.send_and_read_async(msg, GLib.PRIORITY_DEFAULT, null,
+            session.send_and_read_async(msg, GLib.PRIORITY_DEFAULT, cancel,
                                         (sess, res) => {
                 let body = '';
                 try {
@@ -156,8 +175,6 @@ export class YahooClient {
                     GLib.source_remove(timer);
                     reject(e instanceof HttpError ? e
                           : new Error(e.message || 'parse error'));
-                } finally {
-                    session.abort();
                 }
             });
         });
@@ -537,7 +554,8 @@ export class NasdaqClient {
     constructor(back) {
         this.name = 'nasdaq';
         this._back = back;
-        this._class = new Map();              // symbol → 'stocks'|'etf'|'yahoo'
+        this._class = new Map();              // symbol → {ac, exp}
+        this._loadClass();
         this._penaltyUntil = 0;
         this._consecFail = 0;
     }
@@ -546,6 +564,67 @@ export class NasdaqClient {
     retryIn() {
         return Math.max(0,
             Math.ceil(this._penaltyUntil - GLib.get_monotonic_time() / 1e6));
+    }
+
+    /* Classification cache persistence: a cold boot otherwise re-probes
+     * every symbol's asset class before trusting a sparkline, which is
+     * most of the first round's latency. The map is tiny, re-probes are
+     * self-healing (a miss re-classifies and rewrites), so a stale file
+     * is at worst one wasted attempt. */
+    _cacheFile() {
+        return Gio.File.new_for_path(
+            `${GLib.get_user_data_dir()}/tickerglass/asset-class.json`);
+    }
+
+    /* classification accessors — entries expire so a symbol moving
+     * between houses (new listing, delisting) self-heals within 30min */
+    _ac(sym) {
+        const e = this._class.get(sym);
+        if (!e)
+            return null;
+        if (GLib.get_real_time() / 1e6 > e.exp) {
+            this._class.delete(sym);       // re-probe this round
+            return null;
+        }
+        return e.ac;
+    }
+
+    _classSet(sym, ac) {
+        this._class.set(sym, {ac,
+            exp: GLib.get_real_time() / 1e6 + 1800});
+    }
+
+    _loadClass() {
+        try {
+            // load_contents (not load_bytes: this build's binding hands
+            // back a GBytes that lacks get_data) — bytes come as Uint8Array
+            const [ok, bytes] = this._cacheFile().load_contents(null);
+            if (!ok || !bytes)
+                return;
+            const m = JSON.parse(new TextDecoder().decode(bytes));
+            const now = GLib.get_real_time() / 1e6;
+            for (const [sym, e] of Object.entries(m))
+                if (e && typeof e.exp === 'number' && e.exp > now)
+                    this._class.set(sym, e);
+        } catch { /* first boot, no file — fine */ }
+    }
+
+    _saveClass() {
+        try {
+            const m = Object.fromEntries(this._class);
+            const dir = this._cacheFile().get_parent();
+            try {
+                dir.make_directory(null);   // EXISTS just means already fine
+            } catch { /* already there */ }
+            const out = new GLib.Bytes(new TextEncoder().encode(
+                JSON.stringify(m)));
+            // this GJS/GIO build has neither FileCreateFlags nor
+            // File.replace_bytes (introspection gaps) — classic replace,
+            // and an explicit close so the buffered write lands now
+            const st = this._cacheFile().replace(null, false, 0, null);
+            st.write_bytes(out, null);
+            st.close(null);
+        } catch { /* cache is a luxury; never break a fetch over it */ }
     }
 
     _noteFailure() {
@@ -561,7 +640,7 @@ export class NasdaqClient {
 
     _get(path) {
         return new Promise((resolve, reject) => {
-            const session = new Soup.Session({user_agent: UA, timeout: 20});
+            const session = sessionFor(UA, 20);
             const msg = Soup.Message.new('GET', NASDAQ_API + path);
             if (!msg) {
                 reject(new Error(`bad url: ${path}`));
@@ -573,16 +652,17 @@ export class NasdaqClient {
             // hard deadline (see YahooClient._get): a stalled socket must
             // never strand a pending promise — _busy would stay stuck
             let done = false;
+            const cancel = new Gio.Cancellable();
             const timer = GLib.timeout_add_seconds(
                 GLib.PRIORITY_DEFAULT, 25, () => {
                     if (done)
                         return GLib.SOURCE_REMOVE;
                     done = true;
-                    session.abort();
+                    cancel.cancel();
                     reject(new Error('timeout'));
                     return GLib.SOURCE_REMOVE;
                 });
-            session.send_and_read_async(msg, GLib.PRIORITY_DEFAULT, null,
+            session.send_and_read_async(msg, GLib.PRIORITY_DEFAULT, cancel,
                                         (sess, res) => {
                 try {
                     const bytes = sess.send_and_read_finish(res);
@@ -603,8 +683,6 @@ export class NasdaqClient {
                     GLib.source_remove(timer);
                     reject(e instanceof HttpError ? e
                           : new Error(e.message || 'parse error'));
-                } finally {
-                    session.abort();
                 }
             });
         });
@@ -627,7 +705,7 @@ export class NasdaqClient {
     /* symbol → assetclass, probing stocks then etf once and caching the
      * verdict (including 'yahoo' for symbols Nasdaq has never heard of) */
     async _quoteInfo(sym) {
-        const known = this._class.get(sym);
+        const known = this._ac(sym);
         for (const ac of known ? [known] : ['stocks', 'etf']) {
             if (ac === 'yahoo')
                 return {ac, info: null};
@@ -636,12 +714,12 @@ export class NasdaqClient {
                     `/api/quote/${encodeURIComponent(sym)}/info` +
                     `?assetclass=${ac}`);
                 if (d?.data) {
-                    this._class.set(sym, ac);
+                    this._classSet(sym, ac);
                     return {ac, info: d.data};
                 }
             } catch { /* wrong class or transient — try next / give up */ }
         }
-        this._class.set(sym, 'yahoo');
+        this._classSet(sym, 'yahoo');
         return {ac: 'yahoo', info: null};
     }
 
@@ -748,48 +826,85 @@ export class NasdaqClient {
             Math.min(days + 10, 420));
     }
 
-    async quotes(symbols, {sparkRange = '1d'} = {}) {
-        // 3 at a time: the old sequential loop (quote-info pass, then a
-        // spark pass per symbol) made a 9-symbol watchlist crawl for a
-        // full minute on boot; small concurrency keeps us polite
+    async quotes(symbols, {sparkRange = '1d', onQuote = null} = {}) {
+        // 5 at a time with the shared connection pool — the politeness
+        // argument died with the per-request TLS handshakes
+        //
+        // symbols already known to be Yahoo-only (crypto, indices) fire
+        // their relay calls NOW, not after the whole Nasdaq round: the
+        // long relay leg stops gating the stock rows, and stock rows
+        // stream in via onQuote as each lands
+        const rel = [], nas = [];
+        for (const s of symbols)
+            (this._ac(s) === 'yahoo' ? rel : nas).push(s);
+        const relP = rel.length
+            ? this._back.quotes(rel, {sparkRange})
+                .then(b => {
+                    for (const q of b?.quotes ?? [])
+                        if (onQuote)
+                            onQuote(q);
+                    return b?.quotes ?? [];
+                }).catch(() => [])
+            : Promise.resolve([]);
         const results = await mapLimit(
-            symbols, sym => this._quoteOne(sym, sparkRange), 3);
+            nas, async sym => {
+                const r = await this._quoteOne(sym, sparkRange);
+                if (onQuote && r && !r.viaBack)
+                    onQuote(r.q);
+                return r;
+            }, 5);
         const bySym = new Map();
         const viaBack = [];
         results.forEach((r, i) => {
             if (r instanceof Error)
                 return;                       // -> fallback error row
             if (r.viaBack)
-                viaBack.push(symbols[i]);
+                viaBack.push(nas[i]);
             else
-                bySym.set(symbols[i], r.q);
+                bySym.set(nas[i], r.q);
         });
-        let back = null;
-        if (viaBack.length)
-            back = await this._back.quotes(viaBack, {sparkRange})
-                .catch(() => null);
+        // newly-classified strays need their own relay pass
+        const late = viaBack.length
+            ? (await this._back.quotes(viaBack, {sparkRange})
+                .catch(() => null))?.quotes ?? []
+            : [];
+        const back = [...(await relP), ...late];
         const quotes = symbols.map(sym =>
             bySym.get(sym)
-            ?? back?.quotes.find(q => q.symbol === sym)
+            ?? back.find(q => q.symbol === sym)
             ?? {symbol: sym, name: sym, price: null, error: true, spark: null});
+        this._saveClass();
         return {at: Math.floor(GLib.get_real_time() / 1e6), quotes};
     }
 
-    /* one symbol end to end: classify, then fetch its sparkline */
+    /* one symbol end to end: classify (cached), sparkline alongside.
+     * When we already know the house, the spark fires BEFORE the info
+     * call returns — two serial HTTP calls become one round trip. */
     async _quoteOne(sym, sparkRange) {
+        const acs = this._ac(sym);
+        if (acs === 'yahoo')
+            return {viaBack: true};
+        const sparkP = acs
+            ? this._spark(sym, sparkRange, acs).catch(() => null)
+            : null;
         const r = await this._quoteInfo(sym);
         if (r.ac === 'yahoo')
             return {viaBack: true};
         let spark = null;
         try {
-            spark = sparkRange === '1d'
-                ? (await this._chartSeries(sym, r.ac)).points.map(p => p.c)
-                : (await this._dailyDays(sym, r.ac,
-                    Math.min(RANGE_DAYS[sparkRange] ?? 30, 400)
-                )).map(p => p.c);
+            spark = await (sparkP ?? this._spark(sym, sparkRange, r.ac));
         } catch { /* sparkline is optional — quote still paints */ }
         return {q: this._quoteFrom(sym, r.info,
             spark && spark.length > 1 ? spark : null)};
+    }
+
+    /* sidebar sparkline values: session series for 1d, dailies else */
+    _spark(sym, sparkRange, ac) {
+        return sparkRange === '1d'
+            ? this._chartSeries(sym, ac).then(ch => ch.points.map(p => p.c))
+            : this._dailyDays(sym, ac,
+                Math.min(RANGE_DAYS[sparkRange] ?? 30, 400))
+                .then(pts => pts.map(p => p.c));
     }
 
     async history(symbol, range = '1d', interval = 'auto') {
