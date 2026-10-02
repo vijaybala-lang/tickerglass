@@ -31,7 +31,9 @@ export class QuoteItem {
             priceN: num(q.price),
             changeS: q.change != null ? fmtDelta(q.change, q.currency) : '—',
             changeN: num(q.change),
-            pctS: q.changePct != null ? fmtPct(q.changePct) : '—',
+            pctS: q.changePct != null
+                ? `${(q.change ?? q.changePct) >= 0 ? '▲' : '▼'} ${
+                    fmtPct(q.changePct)}` : '—',
             pctN: num(q.changePct),
             dayS: q.dayLow != null && q.dayHigh != null
                 ? `${fmtPrice(q.dayLow, q.currency)} – ${fmtPrice(q.dayHigh, q.currency)}`
@@ -161,7 +163,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         // bold, the symbol rides along as a quiet badge; left justified
         this._heroSym = new Gtk.Label({label: '', css_classes: ['tg-win-sym']});
         this._heroName = new Gtk.Label({
-            label: 'TickerGlass', css_classes: ['tg-win-name'],
+            label: '', css_classes: ['tg-win-name'],
             ellipsize: 3, max_width_chars: 38,
         });
         this._tickerTitle = new Gtk.Box({
@@ -173,6 +175,9 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._tickerTitle.append(this._heroSym);
 
         const hbar = new Adw.HeaderBar();
+        // Adw.HeaderBar paints the window title centered when its title
+        // slot is untouched — feed it an empty box to evict the app name
+        hbar.title_widget = new Gtk.Box();
         this.set_title('TickerGlass');
         const sideBtn = new Gtk.ToggleButton({icon_name: 'sidebar-show-symbolic',
                                               tooltip_text: 'Watchlists (F9)'});
@@ -759,7 +764,10 @@ class TickerWindow extends Adw.ApplicationWindow {
             const q = this._quoteOf(sym);
             row._priceL.set_text(q?.price != null
                 ? fmtPrice(q.price, q.currency) : '—');
-            row._pctL.set_text(q?.changePct != null ? fmtPct(q.changePct) : '');
+            row._pctL.set_text(q?.changePct != null
+                ? `${(q.change ?? q.changePct) >= 0 ? '▲' : '▼'} ${
+                    fmtPct(q.changePct)}`
+                : '');
             row._pctL.remove_css_class('tg-up');
             row._pctL.remove_css_class('tg-down');
             if (q?.change != null)
@@ -1449,7 +1457,7 @@ class TickerWindow extends Adw.ApplicationWindow {
                     .filter(Boolean).join(' · ')
                 : '');
         if (!sym) {
-            this._heroName.set_label('TickerGlass');
+            this._heroName.set_label('');
             this._heroSym.set_label('');
         } else if (name) {
             this._heroName.set_label(name);
@@ -1459,6 +1467,9 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._heroSym.set_label('');
         }
         this._heroSym.set_visible(!!this._heroSym.get_label());
+        // taskbar/window-list identity follows the ticker, not the app
+        this.set_title(sym ? `${symbolShort(sym)} · TickerGlass`
+                           : 'TickerGlass');
     }
 
     _updateHero() {
@@ -1495,13 +1506,28 @@ class TickerWindow extends Adw.ApplicationWindow {
         }
         this._heroPrice.set_label(q.price != null
             ? fmtPrice(q.price, q.currency) : '—');
-        const up = (q.change ?? 0) >= 0;
+        // pill reflects the VISIBLE window, not just the day: on a 2Y
+        // chart "+1.09%" would be the day's move wearing the range's clothes
+        let chg = q.change ?? null, pct = q.changePct ?? null, tag = '';
+        const pts = hist?.points;
+        if (hist && hist.symbol === q.symbol && pts.length > 1) {
+            const base = hist.range === '1d'
+                ? (hist.meta?.prevClose ?? pts[0].c) : pts[0].c;
+            if (base) {
+                chg = pts[pts.length - 1].c - base;
+                pct = chg / base;
+                tag = hist.range === '1d'
+                    ? '' : (RANGE_LABEL[hist.range] ?? '');
+            }
+        }
+        const up = (chg ?? 0) >= 0;
         this._heroPill.set_css_classes(['tg-pill',
                                         up ? 'tg-up-soft' : 'tg-down-soft']);
-        this._heroPill.set_label(q.change != null
-            ? `${fmtDelta(q.change, q.currency)}  ${fmtPct(q.changePct)}` : '');
+        this._heroPill.set_label(chg != null
+            ? `${up ? '▲' : '▼'} ${fmtDelta(chg, q.currency)}  ${
+                fmtPct(pct)}${tag ? ` · ${tag}` : ''}` : '');
         this._heroPrice.set_css_classes(['tg-hero-price',
-                                         q.change != null ? (up ? 'tg-up' : 'tg-down') : '']);
+                                         chg != null ? (up ? 'tg-up' : 'tg-down') : '']);
 
         const m = hist?.meta ?? {};
         const stateTxt = {REGULAR: 'Market open', PRE: 'Pre-market',
