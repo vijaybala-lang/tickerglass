@@ -175,8 +175,27 @@ class TickerWindow extends Adw.ApplicationWindow {
         const searchBtn = new Gtk.Button({icon_name: 'edit-find-symbolic',
                                           tooltip_text: 'Add symbol (/)'});
         searchBtn.set_action_name('win.search');
-        hbar.pack_end(this._menuBtn());
+        const menuBtn = this._menuBtn();
+        hbar.pack_end(menuBtn);
         hbar.pack_end(searchBtn);
+
+        // reading mode replaces the ticker chrome entirely (back pill,
+        // article title, open-externally) — toggled per visible page below
+        this._readBack = new Gtk.Button({label: '← Ticker',
+                                         valign: Gtk.Align.CENTER});
+        this._readBack.add_css_class('tg-chip');
+        this._readBack.connect('clicked', () => this._leaveReader());
+        this._readBack.set_visible(false);
+        hbar.pack_start(this._readBack);
+        this._readExt = new Gtk.Button({icon_name: 'web-browser-symbolic',
+                                        tooltip_text: 'Open in browser'});
+        this._readExt.add_css_class('flat');
+        this._readExt.connect('clicked', () =>
+            this._openUrl(this._readerWeb?.get_uri()));
+        this._readExt.set_visible(false);
+        hbar.pack_end(this._readExt);
+        this._readTitle = new Adw.WindowTitle({title: '',
+                                               subtitle: 'Reading'});
 
         /* —— content column —— */
         const content = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL});
@@ -370,6 +389,15 @@ class TickerWindow extends Adw.ApplicationWindow {
             const p = this._stack.get_visible_child_name();
             chartBtn.set_active(p === 'chart');
             tableBtn.set_active(p === 'table');
+            // the reader owns the whole pane: swap the ticker chrome out
+            const reading = p === 'reader';
+            for (const w of [sideBtn, searchBtn, menuBtn, viewBox])
+                w.set_visible(!reading);
+            this._readBack.set_visible(reading);
+            this._readExt.set_visible(reading);
+            try {
+                hbar.title_widget = reading ? this._readTitle : this._title;
+            } catch { /* older libadwaita keeps the ticker title */ }
         });
 
         // status line
@@ -1342,42 +1370,16 @@ class TickerWindow extends Adw.ApplicationWindow {
                 this._openUrl(url);
                 return;
             }
-            const page = new Gtk.Box({
-                orientation: Gtk.Orientation.VERTICAL, spacing: 8,
-                margin_top: 10, margin_bottom: 6,
-                margin_start: 14, margin_end: 14,
-            });
-            const bar = new Gtk.Box({spacing: 8});
-            const back = new Gtk.Button({label: '← Ticker',
-                                         valign: Gtk.Align.CENTER});
-            back.add_css_class('tg-chip');
-            back.connect('clicked', () => this._leaveReader());
-            const t = new Gtk.Label({
-                label: '', ellipsize: 3,    // Pango EllipsizeMode.END
-                hexpand: true, halign: Gtk.Align.START,
-                css_classes: ['dim-label'],
-            });
-            const ext = new Gtk.Button({icon_name: 'web-browser-symbolic',
-                                        tooltip_text: 'Open in browser'});
-            ext.add_css_class('flat');
-            ext.connect('clicked', () =>
-                this._openUrl(this._readerWeb.get_uri() ?? url));
-            bar.append(back);
-            bar.append(t);
-            bar.append(ext);
+            // full-bleed page; all controls live in the morphed header bar
             const web = new WebKit.WebView();
             web.set_vexpand(true);
-            page.append(bar);
-            page.append(web);
             // add_titled (not add_child): GJS binds add_child to the
             // 1-arg GtkWidget method and drops the name. Harmless here —
             // the Chart/Table toggles are manual buttons, not a ViewSwitcher
-            this._stack.add_titled(page, 'reader', 'Reader');
-            this._readerPage = page;
-            this._readerTitle = t;
+            this._stack.add_titled(web, 'reader', 'Reader');
             this._readerWeb = web;
         }
-        this._readerTitle.set_text(title ?? '');
+        this._readTitle.set_title(title ?? 'Story');
         this._readerWeb.load_uri(url);
         this._stack.set_visible_child_name('reader');
     }
