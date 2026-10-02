@@ -84,6 +84,44 @@ window { font-family: Inter, Cantarell, sans-serif; }
 .tg-add:hover { background: alpha(@success-color, 0.82); }
 .tg-add:active { background: alpha(@success-color, 0.65); }
 .tg-add image, .tg-add label { color: inherit; }
+/* inline search results (header popover rows) */
+.tg-search-pop { padding: 7px 10px; border-radius: 8px; }
+.tg-search-pop:hover, .tg-search-pop:focus {
+    background: alpha(#a3a3a3, 0.18);
+}
+/* swipe-to-delete: the ✕ sits behind the row's right edge, revealed by
+ * sliding the row's own clip leftwards (no tree changes, no grab) */
+.tg-del-reveal {
+    background: #c01c28;
+    border-radius: 8px;
+    margin: 2px 6px 2px 0;
+}
+.tg-del-reveal button {
+    background: transparent;
+    color: #ffffff;
+    font-weight: 700;
+    box-shadow: none;
+}
+/* reorder drag: ghost chip floats over the list (an overlay child — it
+ * never touches the row under the pointer grab), and the accent line
+ * marks the landing slot; inset shadow so rows never shift layout */
+.tg-ghost {
+    background: alpha(#3584e4, 0.95);
+    border-radius: 8px;
+    padding: 2px 14px;
+    margin-left: 14px;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+}
+.tg-ghost label {
+    color: #ffffff;
+    font-weight: 700;
+}
+row.tg-drop-line {
+    box-shadow: inset 0 2px 0 #3584e4;
+}
+row.tg-drop-below {
+    box-shadow: inset 0 -2px 0 #3584e4;
+}
 
 /* swipe-to-delete: the red ✕ pushed into the row's end */
 .tg-del-reveal {

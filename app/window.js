@@ -497,43 +497,32 @@ class TickerWindow extends Adw.ApplicationWindow {
             if (row?._sym)
                 this._selectSymbol(row._sym);
         });
-        {
-            // hold-drag reordering: rows are DragSources (prepare hands
-            // out the symbol), the list is the one DropTarget. The drop
-            // inserts before/after the row under the pointer by which
-            // half of it was landed on, then writes the on-screen order
-            // back to gsettings
-            const dt = new Gtk.DropTarget({actions: Gdk.DragAction.MOVE});
-            dt.connect('drop', (t, value, x, y) => {
-                const src = this._dndRow;
-                if (!src || typeof value !== 'string' || value !== src._sym)
-                    return false;
-                const dst = this._symList.get_row_at_y(y);
-                if (!dst || dst === src)
-                    return false;
-                const rows = [];
-                for (let c = this._symList.get_first_child(); c;
-                     c = c.get_next_sibling())
-                    rows.push(c);
-                const a = dst.get_alloc();
-                let ix = rows.indexOf(dst) + (y > a.y + a.height / 2 ? 1 : 0);
-                if (rows.indexOf(src) < ix)
-                    ix--;                       // lifting src shifts left
-                this._symList.insert(src, ix);
-                this._persistRowOrder();
-                return true;
-            });
-            this._symList.add_controller(dt);
-        }
         const symClick = new Gtk.GestureClick();
         symClick.set_button(3);
         symClick.connect('pressed', (g, nPress, x, y) => {
             const row = this._symList.get_row_at_y(y);
-            this._showRowMenu(row?._sym, this._symList);
+            if (GLib.getenv('TG_GESTURE'))
+                log(`ROWMENU pressed sym=${row?._sym ?? 'hero'}`);
+            this._showRowMenu(row?._sym, this._symList, x, y);
         });
         this._symList.add_controller(symClick);
         const symScroll = new Gtk.ScrolledWindow({vexpand: true});
-        symScroll.set_child(this._symList);
+        // overlay over the list hosts the drag ghost chip: it is a NEW
+        // widget riding an overlay — it never reparents the row under
+        // the pointer grab (which is what killed the paint before)
+        {
+            const symOv = new Gtk.Overlay();
+            symOv.set_child(this._symList);
+            this._ghost = new Gtk.Box({
+                css_classes: ['tg-ghost'],
+                halign: Gtk.Align.START, valign: Gtk.Align.START,
+            });
+            this._ghostLbl = new Gtk.Label({label: ''});
+            this._ghost.append(this._ghostLbl);
+            this._ghost.set_visible(false);
+            symOv.add_overlay(this._ghost);
+            symScroll.set_child(symOv);
+        }
         sideBox.append(symScroll);
         sidebar.set_child(sideBox);
 
@@ -645,6 +634,7 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._settings.set_string('chart-interval', v.get_string()[0]));
         act('select', 's', (a, v) => this._selectSymbol(v.get_string()[0]));
         act('removeSymbol', 's', (a, v) => this._removeSymbol(v.get_string()[0]));
+        act('moveSymbol', 's', (a, v) => this._moveSymbol(v.get_string()[0]));
         act('details', 's', (a, v) => this._openDetails(v.get_string()[0]));
         act('copy', 's', (a, v) => {
             const [s] = v.get_string();
@@ -766,9 +756,15 @@ class TickerWindow extends Adw.ApplicationWindow {
                                      spacing: 8, margin_start: 10,
                                      margin_end: 10, margin_top: 5,
                                      margin_bottom: 5});
-            const symL = new Gtk.Label({label: sym, ellipsize: 3, xalign: 0});
+            // NO ellipsize here, deliberately: GTK auto-marks ellipsized
+            // labels selectable when truncation happens during layout —
+            // after any explicit set_selectable(false) — and a selectable
+            // label carries its own text DragSource that hijacks the
+            // long-press, so dragging moved the symbol TEXT, not the row
+            const symL = new Gtk.Label({label: sym, xalign: 0});
             symL.add_css_class('tg-row-sym');
             symL.set_max_width_chars(10);
+            symL.set_selectable(false);
             box.append(symL);
             const spark = new Gtk.DrawingArea({content_width: 56,
                                                content_height: 22});
@@ -805,14 +801,30 @@ class TickerWindow extends Adw.ApplicationWindow {
             });
             box.append(delBtn);
             row._delBtn = delBtn;
-            row.add_controller(this._swipeGesture(row, delBtn));
-            const ds = new Gtk.DragSource({actions: Gdk.DragAction.MOVE});
-            ds.connect('prepare', () => {
-                this._dndRow = row;
-                return Gdk.ContentProvider.new_for_value(row._sym);
-            });
-            ds.connect('drag-end', () => { this._dndRow = null; });
-            row.add_controller(ds);
+            // ONE gesture per row serves both interactions, decided by
+            // the axis of the initial motion: horizontal reveals delete,
+            // vertical drags the row up/down the list. No GtkDragSource:
+            // GTK's DnD protocol cancelled every drag within a
+            // millisecond of starting, identically on X11 and Wayland
+            // (the sequence grab fails somewhere under OverlaySplitView's
+            // own swipe controllers) — while plain gestures, which never
+            // leave the client, work fine.
+            row.add_controller(this._rowGesture(row, delBtn));
+        // grab cursor: rows must LOOK draggable (try/catch: Gdk cursor
+        // construction is the kind of thing this GJS drops on the floor)
+        const hov = new Gtk.EventControllerMotion();
+        hov.connect('enter', () => {
+            try {
+                row.set_cursor(Gdk.Cursor.new_from_name('all-scroll',
+                    null));
+            } catch (e) { /* cursor is polish, not function */ }
+        });
+        hov.connect('leave', () => {
+            try {
+                row.set_cursor(null);
+            } catch (e) { /* ditto */ }
+        });
+        row.add_controller(hov);
             row.set_child(box);
             row._priceL = priceL;
             row._pctL = pctL;
@@ -822,6 +834,9 @@ class TickerWindow extends Adw.ApplicationWindow {
         }
         this._updateWatchRows();
         this._swipeOpen = null;               // rows are new objects now
+        if (this._ghost)
+            this._ghost.set_visible(false);   // stale during a rebuild
+        this._clearDropLine();
         this._repaintTitle();
     }
 
@@ -840,52 +855,167 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._swipeOpen = open ? row : null;
     }
 
-    /* the row's GestureDrag: horizontal movement claims the reveal,
-     * anything else is left to the click and the DragSource; the axis
-     * locks on the first motion past the touch threshold */
-    _swipeGesture(row, btn) {
+    /* The row's one GestureDrag, claimed outright at begin. The axis of
+     * the first motion picks the interaction: horizontal reveals the red
+     * ✕; vertical drags the row live through the list (swapping at
+     * half-row steps) and persists the new order on release. */
+    _rowGesture(row, btn) {
         const g = new Gtk.GestureDrag();
-        let axis = null, startOff = 0, off = 0;
-        g.connect('drag-begin', () => {
-            axis = null;
+        const gdb = !!GLib.getenv('TG_GESTURE');
+        let axis = null, startOff = 0, off = 0, upd = 0;
+        let rowH = 1, moved = false, lastY = 0;
+        // GestureDrag::drag-begin passes (x, y, sequence) — sequence is
+        // LAST, and the axis must be decided here (a gesture left
+        // participating without claim/release poisons other handlers)
+        g.connect('drag-begin', (self, bx, by, seq) => {
+            if (!seq)
+                seq = g.get_last_updated_sequence();
             startOff = off = this._swipeOpen === row ? TG_DEL_W : 0;
+            upd = 0;
+            moved = false;
+            axis = 'y';
+            const [okS, sx, sy] = g.get_start_point();
+            const [okP, px, py] = seq ? g.get_point(seq, g.get_widget())
+                                      : [false, 0, 0];
+            if (okS && okP && Math.abs(px - sx) > Math.abs(py - sy))
+                axis = 'x';
+            // get_height() survives in this GJS; get_alloc and
+            // set_translation do NOT exist here (probed), so there is no
+            // transform API to lift the row — feedback is opacity only,
+            // and the reorder lands on release via a data-level shift
+            rowH = row.get_height() >= 24 ? row.get_height() : 44;
+            if (gdb)
+                log(`GESTURE row-begin ${row._sym} axis=${axis}`);
+            // freeze the settings fan-out mid-drag: a rebuild would
+            // destroy the row under the pointer and corrupt the list
+            // (insert_after assertion storm, rows vanishing)
+            this._dragging = true;
+            if (axis === 'y' && this._ghost) {
+                const q = this._quoteOf ? this._quoteOf(row._sym) : null;
+                this._ghostLbl.set_text(row._sym + (q && q.price != null
+                    ? '  ' + fmtPrice(q.price, q.currency) : ''));
+                const wl0 = this._activeList();
+                const from0 = wl0 ? wl0.symbols.indexOf(row._sym) : 0;
+                this._ghost.set_size_request(-1,
+                    Math.max(rowH - 6, 24));
+                this._ghost.set_margin_top(Math.max(0, from0 * rowH));
+                this._ghost.set_visible(true);
+            }
+            if (seq)
+                g.set_sequence_state(seq, Gtk.EventSequenceState.CLAIMED);
         });
         g.connect('drag-update', (self, x, y) => {
-            if (axis === null) {
-                if (Math.abs(x) < 5 && Math.abs(y) < 5)
+            if (axis === 'x') {
+                if (gdb && ++upd > 3)
                     return;
-                axis = Math.abs(x) > Math.abs(y) ? 'x' : 'y';
-            }
-            if (axis !== 'x')
+                off = Math.max(0, Math.min(TG_DEL_W, startOff - x));
+                if (off > 1 && this._swipeOpen && this._swipeOpen !== row)
+                    this._setSwipe(this._swipeOpen, false);
+                btn.set_visible(off > 1);
+                btn.set_size_request(Math.round(off), -1);
                 return;
-            off = Math.max(0, Math.min(TG_DEL_W, startOff - x));
-            if (off > 1 && this._swipeOpen && this._swipeOpen !== row)
-                this._setSwipe(this._swipeOpen, false);
-            btn.set_visible(off > 1);
-            btn.set_size_request(Math.round(off), -1);
+            }
+            // vertical: no transform API in this GJS (set_translation
+            // missing), so the row itself cannot lift — the ghost chip
+            // and the insertion line carry the motion instead, and the
+            // reorder commits as a data shift on release. The widget
+            // tree is never touched under the live grab: that's what
+            // killed the listbox paint before.
+            lastY = y;
+            row.set_opacity(0.35);
+            const wl = this._activeList();
+            const from = wl ? wl.symbols.indexOf(row._sym) : -1;
+            if (from < 0)
+                return;
+            const to = Math.max(0, Math.min(wl.symbols.length - 1,
+                from + (Math.sign(y) * Math.floor(Math.abs(y) / rowH))));
+            moved = to !== from;
+            if (this._ghost)
+                this._ghost.set_margin_top(
+                    Math.max(0, from * rowH + y - rowH / 3));
+            // line at the future slot: top edge of the row being pushed
+            // down (bottom edge when dropping past the very last row)
+            const kids = [];
+            for (let c = this._symList.get_first_child(); c;
+                 c = c.get_next_sibling())
+                kids.push(c);
+            let tgt = null, cls = 'tg-drop-line';
+            if (y > 0 && to === kids.length - 1 && from < to) {
+                tgt = kids[kids.length - 1];
+                cls = 'tg-drop-below';
+            } else {
+                tgt = kids[to];
+            }
+            if (tgt && tgt !== this._dropLineRow) {
+                this._clearDropLine();
+                tgt.add_css_class(cls);
+                this._dropLineRow = tgt;
+                this._dropLineCls = cls;
+            }
+            if (gdb && ++upd < 4)
+                log(`GESTURE row-drag ${row._sym} dy=${Math.round(y)} `
+                    + `to=${to}`);
         });
         g.connect('drag-end', () => {
+            this._dragging = false;
             // GestureDrag folds cancel into end — settle covers both
-            if (axis === 'x')
+            if (gdb)
+                log(`GESTURE row-end ${row._sym} axis=${axis} off=${off}`
+                    + ` lastY=${Math.round(lastY)} moved=${moved}`);
+            if (axis === 'x') {
                 this._setSwipe(row, off > TG_DEL_W / 2);
+            } else {
+                if (this._ghost)
+                    this._ghost.set_visible(false);
+                this._clearDropLine();
+                row.set_opacity(1);
+                const wl = this._activeList();
+                const from = wl ? wl.symbols.indexOf(row._sym) : -1;
+                if (moved && from >= 0) {
+                    // same full-row-height steps as the live line
+                    const steps = Math.sign(lastY) *
+                        Math.floor(Math.abs(lastY) / rowH);
+                    const to = Math.max(0, Math.min(
+                        wl.symbols.length - 1, from + steps));
+                    if (to !== from)
+                        this._applyDragShift(row._sym, from, to);
+                }
+            }
+            if (this._dragPending) {
+                this._dragPending = false;
+                this._rebuildSidebar();
+                this._refresh(true);
+            }
         });
         return g;
     }
 
-    /* write the on-screen row order back to gsettings (after DnD) */
-    _persistRowOrder() {
+    /* drop the accent line off whichever row carries it (a rebuild may
+     * have replaced that widget under us — remove_css_class on a dead
+     * row is harmless, but we drop the stale ref here) */
+    _clearDropLine() {
+        if (this._dropLineRow) {
+            this._dropLineRow.remove_css_class(this._dropLineCls ||
+                'tg-drop-line');
+            this._dropLineRow = null;
+            this._dropLineCls = null;
+        }
+    }
+
+    /* commit a live-drag displacement to the SYMBOL ARRAY — the widget
+     * order is never trusted as source (a desynced tree is what turned
+     * 15 symbols into 0 the first go). The gsettings watcher rebuilds
+     * the sidebar from data with fresh widgets: the paint always
+     * starts clean, nothing is reparented under a live grab. */
+    _applyDragShift(symbol, from, to) {
         const lists = this._lists();
         const wl = this._activeList(lists);
-        if (!wl)
+        if (!wl || wl.symbols[from] !== symbol)
             return;
-        const order = [];
-        for (let c = this._symList.get_first_child(); c;
-             c = c.get_next_sibling())
-            if (c._sym)
-                order.push(c._sym);
-        if (!order.length)
-            return;
-        wl.symbols = order;
+        const syms = wl.symbols.slice();
+        syms.splice(from, 1);
+        syms.splice(to, 0, symbol);
+        wl.symbols = syms;
         this._writeLists(lists);
     }
 
@@ -989,6 +1119,35 @@ class TickerWindow extends Adw.ApplicationWindow {
         wl.symbols = wl.symbols.filter(s => s !== symbol);
         this._writeLists(lists);
         this._toast(`${symbol} removed`);
+    }
+
+    /* right-click "move to list": param encodes SYMBOL\tLIST_ID (a tab
+     * can appear in neither a ticker nor a generated list id). Source is
+     * whichever list actually holds the symbol — the menu may open from
+     * the table for a symbol the sidebar already dropped. */
+    _moveSymbol(enc) {
+        const [symbol, targetId] = String(enc).split('\t');
+        const lists = this._lists();
+        const to = lists.find(w => w.id === targetId);
+        if (!to || symbol === undefined)
+            return;
+        let moved = false;
+        for (const w of lists) {
+            if (w === to)
+                continue;
+            if (w.symbols.includes(symbol)) {
+                w.symbols = w.symbols.filter(s => s !== symbol);
+                moved = true;
+            }
+        }
+        if (!to.symbols.includes(symbol)) {
+            to.symbols.push(symbol);
+            moved = true;
+        }
+        if (!moved)
+            return;
+        this._writeLists(lists);
+        this._toast(`${symbol} → ${to.name || 'list'}`);
     }
 
     /* ── search dialog ────────────────────────────────────────────────── */
@@ -1191,17 +1350,80 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._syncColumnMenuState();
     }
 
-    _showRowMenu(sym, parent) {
+    _showRowMenu(sym, parent, x, y) {
+        const gdb = !!GLib.getenv('TG_GESTURE');
         const symbol = sym ?? this._hero();
-        if (!symbol)
+        if (!symbol) {
+            if (gdb)
+                log('ROWMENU no symbol — ignored');
             return;
-        const m = new Gio.Menu();
-        m.append('Details…', `win.details::${symbol}`);
-        m.append('Copy symbol', `win.copy::${symbol}`);
-        m.append('Remove from watchlist', `win.removeSymbol::${symbol}`);
-        const pop = Gtk.PopoverMenu.new_from_model(m);
+        }
+        const lists = this._lists();
+        const homes = lists.filter(w => w.symbols.includes(symbol));
+        // Gtk.PopoverMenu refuses to paint in this GJS (present() ran,
+        // zero pixels — same introspection gremlin family as
+        // FileCreateFlags/set_translation): plain Popover + flat
+        // buttons instead, the very mechanism the search autocomplete
+        // uses, which has never failed to show.
+        const box = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            spacing: 2,
+        });
+        box.set_margin_top(6);
+        box.set_margin_bottom(6);
+        box.set_margin_start(6);
+        box.set_margin_end(6);
+        // 'margin' is not a GTK4 property at all and Popover has no
+        // 'child' construct property — both threw here before popup()
+        // ever ran (the invisible-menu bug of this round)
+        const pop = new Gtk.Popover({autohide: true});
+        pop.set_child(box);
         pop.set_parent(parent ?? this._tableList);
-        pop.present();
+        if (x !== undefined && y !== undefined) {
+            const r = new Gdk.Rectangle();
+            r.x = Math.round(x);
+            r.y = Math.round(y);
+            r.width = 1;
+            r.height = 1;
+            pop.set_pointing_to(r);
+        }
+        const item = (label, fn) => {
+            const b = new Gtk.Button({
+                label,
+                css_classes: ['flat'],
+                hexpand: true,
+            });
+            // buttons center their label; menus read left-aligned —
+            // xalign is the knob that survives on the internal GtkLabel
+            try {
+                b.set_halign(Gtk.Align.FILL);
+                const l = b.get_child();
+                if (l && l.set_xalign)
+                    l.set_xalign(0);
+            } catch (e) { /* alignment is polish, not function */ }
+            b.connect('clicked', () => {
+                pop.popdown();
+                fn();
+            });
+            box.append(b);
+        };
+        item('Details…', () => this._openDetails(symbol));
+        item('Copy symbol', () => {
+            this.clipboard.set_text(symbol, -1);
+            this._toast(`${symbol} copied`);
+        });
+        for (const w of lists) {
+            if (homes.includes(w))
+                continue;
+            item(`Move to ${w.name || w.id}`,
+                () => this._moveSymbol(`${symbol}\t${w.id}`));
+        }
+        if (homes.length)
+            item('Remove from watchlist', () => this._removeSymbol(symbol));
+        this._menuHold = pop;
+        pop.popup();
+        if (gdb)
+            log(`ROWMENU popped up for ${symbol}`);
     }
 
     _refreshTable() {
@@ -1643,9 +1865,12 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._heroSym.set_label('');
         }
         this._heroSym.set_visible(!!this._heroSym.get_label());
-        // taskbar/window-list identity follows the ticker, not the app
+        // taskbar/window-list identity follows the ticker, not the app;
+        // blank (not 'TickerGlass') when no hero — XWayland paints the
+        // WM title into the frame, which is exactly the app-title-in-
+        // header the user asked to evict
         this.set_title(sym ? `${symbolShort(sym)} · TickerGlass`
-                           : 'TickerGlass');
+                           : '');
     }
 
     _updateHero() {
@@ -1867,6 +2092,12 @@ class TickerWindow extends Adw.ApplicationWindow {
     _onSetting(key) {
         switch (key) {
         case 'watchlists':
+            if (this._dragging) {
+                // a fan-out landing mid-drag must not destroy the row
+                // under the pointer — settle it at drag-end instead
+                this._dragPending = true;
+                break;
+            }
             this._rebuildSidebar();
             this._refresh(true);
             break;
