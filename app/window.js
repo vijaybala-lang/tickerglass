@@ -160,13 +160,26 @@ class TickerWindow extends Adw.ApplicationWindow {
     /* ── UI construction ──────────────────────────────────────────────── */
 
     _buildUi() {
-        this._title = new Adw.WindowTitle({title: 'TickerGlass'});
+        // ticker identity lives in the header: big symbol + softer name,
+        // exactly what the page's hero row used to eat vertical space for
+        this._heroSym = new Gtk.Label({label: 'TickerGlass',
+                                       css_classes: ['tg-win-sym']});
+        this._heroName = new Gtk.Label({
+            label: '', css_classes: ['tg-win-name'],
+            ellipsize: 3, max_width_chars: 30,
+        });
+        this._tickerTitle = new Gtk.Box({
+            orientation: Gtk.Orientation.HORIZONTAL, spacing: 10,
+            valign: Gtk.Align.CENTER, halign: Gtk.Align.CENTER,
+        });
+        this._tickerTitle.append(this._heroSym);
+        this._tickerTitle.append(this._heroName);
 
         const hbar = new Adw.HeaderBar();
         try {
-            hbar.title_widget = this._title;
+            hbar.title_widget = this._tickerTitle;
         } catch {
-            hbar.pack(this._title);   // older libadwaita (< 1.4)
+            hbar.pack(this._tickerTitle);   // older libadwaita (< 1.4)
         }
         this.set_title('TickerGlass');
         const sideBtn = new Gtk.ToggleButton({icon_name: 'sidebar-show-symbolic',
@@ -221,12 +234,11 @@ class TickerWindow extends Adw.ApplicationWindow {
                                      spacing: 2});
         const heroTop = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
                                      spacing: 12});
-        this._heroSym = new Gtk.Label({label: '—', css_classes: ['tg-hero-sym']});
-        this._heroName = new Gtk.Label({label: '', css_classes: ['tg-hero-name']});
+        // identity moved to the header; the page leads with the price
         this._heroPrice = new Gtk.Label({label: '', css_classes: ['tg-hero-price']});
         this._heroPill = new Gtk.Label({label: '', css_classes: ['tg-pill']});
-        heroTop.append(this._heroSym);
-        heroTop.append(this._heroName);
+        heroTop.append(this._heroPrice);
+        heroTop.append(this._heroPill);
         heroTop.append(new Gtk.Box());     // spacer
         const spacer = heroTop.get_last_child();
         spacer.set_hexpand(true);
@@ -237,8 +249,6 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._addBtn.set_visible(false);
         this._addBtn.connect('clicked', () => this._addSymbol(this._hero()));
         heroTop.append(this._addBtn);
-        heroTop.append(this._heroPill);
-        heroTop.append(this._heroPrice);
         this._heroBox.append(heroTop);
         this._chips = new Adw.WrapBox({margin_top: 4, line_spacing: 8,
                                        child_spacing: 8});
@@ -396,7 +406,7 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._readBack.set_visible(reading);
             this._readExt.set_visible(reading);
             try {
-                hbar.title_widget = reading ? this._readTitle : this._title;
+                hbar.title_widget = reading ? this._readTitle : this._tickerTitle;
             } catch { /* older libadwaita keeps the ticker title */ }
         });
 
@@ -725,7 +735,7 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._symRows[sym] = row;
         }
         this._updateWatchRows();
-        this._title.set_title(this._activeList()?.name ?? 'TickerGlass');
+        this._repaintTitle();
     }
 
     _quoteOf(sym) {
@@ -1434,6 +1444,22 @@ class TickerWindow extends Adw.ApplicationWindow {
         });
     }
 
+    /* the header IS the ticker name now: big symbol, softer company name */
+    _repaintTitle() {
+        const sym = this._hero();
+        const q = this._quotes.find(x => x.symbol === sym)
+            ?? (this._previewQ?.symbol === sym ? this._previewQ : null);
+        this._heroSym.set_label(sym ? symbolShort(sym) : 'TickerGlass');
+        const name = q
+            ? (q.name !== q.symbol ? q.name : q.exchange ?? '')
+            : (this.isPreview()
+                ? [this._preview.name, this._preview.exchange]
+                    .filter(Boolean).join(' · ')
+                : '');
+        this._heroName.set_label(name);
+        this._heroName.set_visible(!!name);
+    }
+
     _updateHero() {
         const sym = this._hero();
         // no fallback to quotes[0]: painting another ticker's price under
@@ -1444,8 +1470,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._addBtn.set_visible(this.isPreview());
         this._addBtn.set_tooltip_text(
             `Add ${sym} to “${this._activeList()?.name ?? 'Watchlist'}”`);
-        this._title.set_title(this._activeList()?.name ?? 'TickerGlass');
-        this._title.set_subtitle(sym ?? '');
+        this._repaintTitle();
         if (sym !== this._newsFor) {
             this._newsFor = sym;
             this._loadNews(sym);
@@ -1462,19 +1487,11 @@ class TickerWindow extends Adw.ApplicationWindow {
             INTERVAL_LABEL[hist?.interval] ?? 'Auto');
 
         if (!q) {
-            const p = this.isPreview() ? this._preview : null;
-            this._heroSym.set_label(sym || '—');
-            this._heroName.set_label(p
-                ? [p.name && p.name !== sym ? p.name : '', p.exchange]
-                    .filter(Boolean).join(' · ') : '');
             this._heroPrice.set_label('');
             this._heroPill.set_label('');
             renderChips(this._chips, []);
             return;
         }
-        this._heroSym.set_label(symbolShort(q.symbol));
-        this._heroName.set_label(
-            q.name !== q.symbol ? q.name : q.exchange ?? '');
         this._heroPrice.set_label(q.price != null
             ? fmtPrice(q.price, q.currency) : '—');
         const up = (q.change ?? 0) >= 0;

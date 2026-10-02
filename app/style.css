@@ -15,11 +15,12 @@ window { font-family: Inter, Cantarell, sans-serif; }
 @define-color accent_color    #00a95a;
 @define-color accent_fg_color #04170c;
 
-.tg-hero-sym   { font-weight: 800; font-size: 1.55em;
-                 letter-spacing: -0.02em; }
-/* the name is the story; the symbol is the badge — both big, Robinhood
- * style (name slightly softened, never caption-small) */
-.tg-hero-name  { font-weight: 600; font-size: 1.15em; opacity: 0.85; }
+/* header ticker identity — the big font the user asked for; the page
+ * keeps only the price row */
+.tg-win-sym  { font-weight: 800; font-size: 1.5em;
+               letter-spacing: -0.02em; }
+.tg-win-name { font-weight: 600; font-size: 1em; opacity: 0.75;
+               margin-top: 6px; }
 .tg-hero-price { font-weight: 300; font-size: 2.5em;
                  letter-spacing: -0.025em; }
 .tg-hero-price.tg-up   { color: @success-color; }
