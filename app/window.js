@@ -302,7 +302,7 @@ class TickerWindow extends Adw.ApplicationWindow {
             margin_start: 12, margin_end: 12, margin_top: 4, margin_bottom: 6,
         });
         newsScroll.add_css_class('card');
-        this._newsList = new Gtk.ListBox();
+        this._newsList = new Gtk.ListBox({css_classes: ['tg-news-list']});
         this._newsList.add_css_class('flat');
         this._newsList.set_header_func((row, before) => {
             row.set_header(before ? new Gtk.Separator({orientation: Gtk.Orientation.HORIZONTAL}) : null);
@@ -1749,7 +1749,7 @@ function renderChips(wrap, entries) {
 }
 
 function drawCenteredHint(cr, w, h, dark, text) {
-    cr.selectFontFace?.('Cantarell', 0, 0);
+    cr.selectFontFace?.('Inter', 0, 0);
     cr.setFontSize?.(13);
     cr.textExtents?.(text);
     // simple centered placeholder without pulling Pango here

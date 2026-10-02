@@ -27,7 +27,7 @@ export function drawText(cr, text, x, y, {
 } = {}) {
     const layout = showLayout(cr);
     const desc = Pango.FontDescription.new();
-    desc.set_family(mono ? 'Monospace' : 'Cantarell');
+    desc.set_family(mono ? 'Monospace' : 'Inter');
     call(desc, 'setSize', 'set_size', Pango.SCALE * size);
     const w = weight || (bold ? Pango.Weight.BOLD : 0);
     if (w)

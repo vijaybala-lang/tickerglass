@@ -1,0 +1,27 @@
+/* TickerGlass — dark variant overrides. Registered above style.css and
+ * enabled/disabled with Adw.StyleManager.notify::dark. Near-black canvas,
+ * elevated cards, brighter finance accents. */
+
+@define-color window_bg_color #0b0d10;
+@define-color window_fg_color #e9ecef;
+@define-color view_bg_color #101317;
+@define-color view_fg_color #e9ecef;
+@define-color card_bg_color #15181d;
+@define-color card_fg_color #e9ecef;
+@define-color headerbar_bg_color #0b0d10;
+@define-color headerbar_backdrop_color #0b0d10;
+@define-color popover_bg_color #15181d;
+@define-color popover_fg_color #e9ecef;
+@define-color dialog_bg_color #15181d;
+@define-color dialog_fg_color #e9ecef;
+@define-color fg_color #e9ecef;
+
+/* brighter on near-black than the light-scheme tokens */
+@define-color success-color #00d97a;
+@define-color error-color   #ff5c6c;
+@define-color accent_bg_color #00c46a;
+@define-color accent_color    #00d97a;
+@define-color accent_fg_color #06210f;
+
+/* the flat header should disappear into the canvas */
+headerbar { box-shadow: none; border: none; }

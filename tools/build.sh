@@ -22,7 +22,7 @@ cp "$ROOT"/schemas/org.gnome.shell.extensions.tickerglass.gschema.xml "$EXT/sche
 glib-compile-schemas "$EXT/schemas"
 
 # app (schema lives user-level; see install.sh step 3)
-cp "$ROOT"/app/{main.js,window.js,style.css} "$APP/"
+cp "$ROOT"/app/{main.js,window.js,style.css,night.css} "$APP/"
 cp "$ROOT"/shared/{fmt.js,mock.js,yahoo.js,spark.js,prompt.js} "$APP/"
 cp "$ROOT"/app/dev.vijaybala.TickerGlass.desktop "$APP/"
 

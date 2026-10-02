@@ -31,6 +31,14 @@ class TickerGlassApp extends Adw.Application {
         } catch (e) {
             logError(e, 'TickerGlass app: no style.css');
         }
+        this._cssNight = null;
+        try {
+            const night = new Gtk.CssProvider();
+            night.load_from_path(`${DIR}/night.css`);
+            this._cssNight = night;
+        } catch (e) {
+            logError(e, 'TickerGlass app: no night.css');
+        }
     }
 
     vfunc_startup() {
@@ -38,6 +46,23 @@ class TickerGlassApp extends Adw.Application {
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), this._css,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
+        // dark variant rides the resolved scheme (system setting or the
+        // in-app override): libadwaita flips StyleManager:dark, we swap
+        // the override provider on top of the base one
+        const sm = Adw.StyleManager.get_default();
+        const syncVariant = () => {
+            if (!this._cssNight)
+                return;
+            if (sm.get_dark())
+                Gtk.StyleContext.add_provider_for_display(
+                    Gdk.Display.get_default(), this._cssNight,
+                    Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 10);
+            else
+                Gtk.StyleContext.remove_provider_for_display(
+                    Gdk.Display.get_default(), this._cssNight);
+        };
+        syncVariant();
+        sm.connect('notify::dark', syncVariant);
         // shortcuts → window actions
         this.set_accels_for_action('win.refresh', ['F5', 'r']);
         this.set_accels_for_action('win.search', ['<Primary>f', 'slash']);

@@ -10,10 +10,10 @@
 .tg-panel-chg { font-weight: 500; font-size: 0.9em; }
 
 /* up/down ink: bright enough for dark panels, deep enough for light ones */
-.tg-panel-box.tg-dark .tg-up   { color: #46d98b; }
-.tg-panel-box.tg-dark .tg-down { color: #ff7a80; }
-.tg-panel-box.tg-light .tg-up   { color: #0c8a4e; }
-.tg-panel-box.tg-light .tg-down { color: #c93b42; }
+.tg-panel-box.tg-dark .tg-up   { color: #00d97a; }
+.tg-panel-box.tg-dark .tg-down { color: #ff5c6c; }
+.tg-panel-box.tg-light .tg-up   { color: #00995a; }
+.tg-panel-box.tg-light .tg-down { color: #e8435a; }
 
 /* ── popup chrome ───────────────────────────────────────────────────────── */
 /* compound selector outranks the theme's popup padding (weatherglass trick) */

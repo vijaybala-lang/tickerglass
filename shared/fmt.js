@@ -7,11 +7,11 @@
  * Rose/red for down, mint/green for up — same hues cairo painters, CSS pills
  * and the app table all agree on. rgb arrays feed cairo setSourceRGBA. */
 export const COLORS = {
-    up:   [0.18, 0.76, 0.49],   // ~ #2ec27e
-    down: [0.88, 0.34, 0.36],   // ~ #e0575c
+    up:   [0.00, 0.71, 0.38],   // #00b562 — Robinhood-adjacent green
+    down: [0.96, 0.27, 0.36],   // #f5455c
     flat: [0.62, 0.66, 0.72],
-    upCss:   '#2ec27e',
-    downCss: '#e0575c',
+    upCss:   '#00b562',
+    downCss: '#f5455c',
 };
 
 /* ── ranges & intervals ─────────────────────────────────────────────────── */

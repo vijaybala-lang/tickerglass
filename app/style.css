@@ -1,31 +1,44 @@
-/* TickerGlass app — libadwaita styling. Cards/chips adapt to Adwaita light
- * and dark automatically via named colors; only finance-specific bits are
- * pinned here. */
+/* TickerGlass app — libadwaita styling, light base. Dark-mode overrides
+ * live in night.css (toggled with Adw.StyleManager), so this file stays
+ * scheme-agnostic wherever libadwaita named colors can carry it.
+ * Robinhood-flavored: Inter type, thin big prices, neutral rounded rows,
+ * green accent replacing the default blue. */
 
-.tg-hero-sym   { font-weight: 800; font-size: 1.15em; }
-.tg-hero-price { font-weight: 200; font-size: 2.2em; }
-.tg-hero-price.tg-up   { color: alpha(@green_3, 0.95); }
-.tg-hero-price.tg-down { color: alpha(@red_2, 1); }
+window { font-family: Inter, Cantarell, sans-serif; }
+
+/* finance semantic tokens (night.css brightens them) */
+@define-color success-color #00995a;
+@define-color error-color   #e8435a;
+
+/* brand accent: focus rings, switch, Chart/Table segment pill */
+@define-color accent_bg_color #00b562;
+@define-color accent_color    #00a95a;
+@define-color accent_fg_color #04170c;
+
+.tg-hero-sym   { font-weight: 800; font-size: 1.2em;
+                 letter-spacing: -0.01em; }
+.tg-hero-price { font-weight: 300; font-size: 2.5em;
+                 letter-spacing: -0.025em; }
+.tg-hero-price.tg-up   { color: @success-color; }
+.tg-hero-price.tg-down { color: @error-color; }
 .tg-up   { color: @success-color; }
 .tg-down { color: @error-color; }
-@define-color success-color alpha(@green_3, 1);
-@define-color error-color   alpha(@red_2, 1);
 
 /* ± pill under the big price */
 .tg-pill {
   font-weight: 700;
-  padding: 2px 12px;
+  padding: 3px 13px;
   border-radius: 99px;
 }
 .tg-up-soft {
-  background-color: alpha(@green_3, 0.16);
-  color: @green_3;
-  border: 1px solid alpha(@green_3, 0.4);
+  background-color: alpha(@success-color, 0.14);
+  color: @success-color;
+  border: 1px solid alpha(@success-color, 0.35);
 }
 .tg-down-soft {
-  background-color: alpha(@red_2, 0.14);
-  color: @red_2;
-  border: 1px solid alpha(@red_2, 0.4);
+  background-color: alpha(@error-color, 0.12);
+  color: @error-color;
+  border: 1px solid alpha(@error-color, 0.35);
 }
 
 /* range chips */
@@ -52,8 +65,8 @@
   border: 1px solid alpha(currentcolor, 0.10);
 }
 
-/* chart area */
-.tg-chart-area { border-radius: 12px; }
+/* chart card */
+.tg-chart-area { border-radius: 16px; }
 
 /* table change columns inherit .tg-up/.tg-down */
 .tg-col-change { font-weight: 600; }
@@ -64,10 +77,25 @@
          border-radius: 8px; opacity: 0.75; min-height: 0; }
 .tg-th:hover { background: alpha(currentcolor, 0.07); }
 .tg-th-active { opacity: 1; background: alpha(currentcolor, 0.10); }
-list row { border-radius: 8px; }
+list row { border-radius: 12px; }
 
-/* sidebar count pill */
-.sidebar row:selected { border-radius: 8px; }
+/* sidebar: floating neutral rows (Robinhood grays, not Adwaita blue) */
+.sidebar row { border-radius: 12px; margin: 1px 6px; }
+.sidebar row:selected {
+  background: alpha(currentcolor, 0.08);
+  color: inherit;
+  box-shadow: none;
+  outline: none;
+}
+
+/* news: individual cards instead of a flat list */
+.tg-news-list { padding: 0 2px; }
+.tg-news-list row {
+  background: alpha(currentcolor, 0.04);
+  border-radius: 14px;
+  margin: 4px 6px;
+}
+.tg-news-list row:hover { background: alpha(currentcolor, 0.08); }
 
 /* dialogs */
 .dlg-pad { padding: 18px; }
