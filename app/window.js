@@ -352,7 +352,14 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._chart.set_content_height(220);
         this._chart.set_margin_top(8);
         this._chart.add_css_class('tg-chart-area');
-        this._chart.set_draw_func((area, cr, w, h) => this._drawChart(cr, w, h));
+        this._chart.set_draw_func((area, cr, w, h) => {
+            const t = GLib.getenv('TG_TIMING')
+                ? GLib.get_monotonic_time() : 0;
+            this._drawChart(cr, w, h);
+            if (t)
+                log(`TG chart paint: ${((GLib.get_monotonic_time()
+                                      - t) / 1e3).toFixed(1)}ms`);
+        });
         const hover = new Gtk.EventControllerMotion();
         hover.connect('motion', (c, x) => {
             this._cursor = {x};
@@ -1235,10 +1242,12 @@ class TickerWindow extends Adw.ApplicationWindow {
     }
 
     /* push fresh quote data into the sidebar rows (labels + sparklines) */
-    _updateWatchRows() {
+    _updateWatchRows(onlySym = null) {
         if (!this._symRows)
             return;
         for (const [sym, row] of Object.entries(this._symRows)) {
+            if (onlySym && sym !== onlySym)
+                continue;
             const q = this._quoteOf(sym);
             row._priceL.set_text(q?.price != null
                 ? fmtPrice(q.price, q.currency) : '—');
@@ -1692,6 +1701,8 @@ class TickerWindow extends Adw.ApplicationWindow {
     _refreshTable() {
         if (!this._tableList)
             return;
+        const _t = GLib.getenv('TG_TIMING')
+            ? GLib.get_monotonic_time() : 0;
         const cfg = this._columnsSetting();
         const prop = SORT_PROP[cfg.sort] ?? 'sym';
         const numeric = prop.endsWith('-n');
@@ -1760,6 +1771,9 @@ class TickerWindow extends Adw.ApplicationWindow {
             if (q.symbol === hero)
                 this._tableList.select_row(row);
         }
+        if (_t)
+            log(`TG table rebuild: ${sorted.length} rows in ` +
+                `${((GLib.get_monotonic_time() - _t) / 1e3).toFixed(1)}ms`);
     }
 
     /* ── data flow ────────────────────────────────────────────────────── */
@@ -1855,6 +1869,11 @@ class TickerWindow extends Adw.ApplicationWindow {
                 this._busy = false;
                 this._busySince = 0;
                 this._spinner.set_visible(false);
+                // final pass wins over any debounced partial rebuild
+                if (this._tablePend) {
+                    GLib.source_remove(this._tablePend);
+                    this._tablePend = 0;
+                }
                 this._refreshTable();
                 this._updateWatchRows();
                 this._updateHero();
@@ -1904,8 +1923,17 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._quotes[i] = q;
         else
             this._quotes.push(q);
-        this._refreshTable();
-        this._updateWatchRows();
+        // measured: a full table rebuild costs ~8ms at 11 symbols, and
+        // quotes arrive faster than that — rebuild once per burst instead
+        // of once per quote (the round-done pass flushes the pending one)
+        if (!this._tablePend)
+            this._tablePend = GLib.timeout_add(GLib.PRIORITY_LOW, 250, () => {
+                this._tablePend = 0;
+                if (!this._dead)
+                    this._refreshTable();
+                return GLib.SOURCE_REMOVE;
+            });
+        this._updateWatchRows(q.symbol);
         if (q.symbol === this._hero())
             this._updateHero();
     }
