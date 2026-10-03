@@ -15,6 +15,12 @@ window { font-family: Inter, Cantarell, sans-serif; }
 @define-color accent_color    #00a95a;
 @define-color accent_fg_color #04170c;
 
+/* OS accent mirror: main.js overwrites these two at startup with the
+ * real GNOME accent (and luminance-chosen ink); the values here are the
+ * no-JS-safety fallback */
+@define-color tg-accent    #3584e4;
+@define-color tg-accent-fg #ffffff;
+
 /* header ticker identity: company name is the hero, symbol the badge */
 .tg-win-name { font-weight: 800; font-size: 1.45em;
                letter-spacing: -0.02em; }
@@ -45,17 +51,30 @@ window { font-family: Inter, Cantarell, sans-serif; }
   font-size: 28px;
   font-weight: 500;
   padding: 2px 14px;
-  border-radius: 14px;
+  border-radius: 999px;   /* capsule: the *look* both controls share */
 }
+/* directional tint pills. GTK4 REMOVED shade()/darker()/lighter() from
+ * CSS (GTK3-era functions — silently dropped, which is why the first
+ * attempt showed nothing): the outline is therefore the theme color at
+ * high alpha — against a dark gradient fill it reads as the darker
+ * ring around a deep center in both themes */
 .tg-up-soft {
-  background-color: alpha(@success-color, 0.14);
+  background-color: alpha(@success-color, 0.06);
+  background-image: linear-gradient(180deg,
+      alpha(@success-color, 0.38) 0%,
+      alpha(@success-color, 0.06) 100%);
   color: @success-color;
-  border: 1px solid alpha(@success-color, 0.35);
+  border: 1px solid alpha(@success-color, 0.85);
+  box-shadow: inset 0 1px 0 alpha(#ffffff, 0.14);
 }
 .tg-down-soft {
-  background-color: alpha(@error-color, 0.12);
+  background-color: alpha(@error-color, 0.06);
+  background-image: linear-gradient(180deg,
+      alpha(@error-color, 0.36) 0%,
+      alpha(@error-color, 0.06) 100%);
   color: @error-color;
-  border: 1px solid alpha(@error-color, 0.35);
+  border: 1px solid alpha(@error-color, 0.85);
+  box-shadow: inset 0 1px 0 alpha(#ffffff, 0.14);
 }
 
 /* range chips */
@@ -82,20 +101,58 @@ window { font-family: Inter, Cantarell, sans-serif; }
   border: 1px solid alpha(currentcolor, 0.10);
 }
 
-/* the preview's commit button: filled green pill, generous hit target */
+/* the preview's commit button: green pill on the badge line, sized to
+ * sit with the range chips instead of towering over the price */
 .tg-add {
-  background: @success-color;
-  color: @accent_fg_color;
-  border: none;
-  border-radius: 99px;
-  padding: 8px 20px;
+  /* follows the user's OS accent via main.js's tg-accent mirror token
+     (NOT @accent_bg_color — this app redefines that to brand green);
+     the gradient is a white-highlight / black-shade SHEEN layered over
+     it, since GTK4 CSS cannot lighten/darken — any accent keeps the
+     same glossy depth */
+  background-color: @tg-accent;
+  background-image: linear-gradient(180deg,
+      alpha(#ffffff, 0.20) 0%,
+      alpha(#ffffff, 0.03) 52%,
+      alpha(#000000, 0.16) 100%);
+  color: @tg-accent-fg;
+  border: 1px solid alpha(#000000, 0.28);
+  border-radius: 8px;   /* between crisp and soft */
+  padding: 7px 14px;
+  font-size: 0.85em;
   font-weight: 700;
+  min-height: 0;
+  min-width: 0;
+  box-shadow: inset 0 1px 0 alpha(#ffffff, 0.25);
   min-height: 0;
   box-shadow: none;
 }
-.tg-add:hover { background: alpha(@success-color, 0.82); }
-.tg-add:active { background: alpha(@success-color, 0.65); }
-.tg-add image, .tg-add label { color: inherit; }
+.tg-add:hover {
+  background-image: linear-gradient(180deg,
+      alpha(#ffffff, 0.28) 0%,
+      alpha(#ffffff, 0.10) 52%,
+      alpha(#000000, 0.10) 100%);
+}
+.tg-add:active {
+  background-image: linear-gradient(180deg,
+      alpha(#000000, 0.10) 0%,
+      alpha(#000000, 0.22) 100%);
+  box-shadow: none;
+}
+.tg-add image, .tg-add label { color: @tg-accent-fg; }
+/* no focus ring on click — GTK CSS does not parse the `outline: none`
+ * shorthand (web syntax); outline-width/colour must be set explicitly */
+.tg-add:focus, .tg-add:focus-visible, .tg-add:checked {
+  outline-width: 0;
+  outline-color: transparent;
+  box-shadow: inset 0 1px 0 alpha(#ffffff, 0.25);
+}
+/* hairline separator inside the single add-button: divides the add zone
+ * from the caret zone (clicks are routed by position, not by widget) */
+.tg-add-sep {
+  background: alpha(#ffffff, 0.35);
+  min-width: 1px;
+  margin: 3px 0;
+}
 /* inline search results (header popover rows) */
 .tg-search-pop { padding: 7px 10px; border-radius: 8px; }
 .tg-search-pop:hover, .tg-search-pop:focus {

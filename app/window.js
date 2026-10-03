@@ -35,9 +35,7 @@ export class QuoteItem {
             priceN: num(q.price),
             changeS: q.change != null ? fmtDelta(q.change, q.currency) : '—',
             changeN: num(q.change),
-            pctS: q.changePct != null
-                ? `${(q.change ?? q.changePct) >= 0 ? '▲' : '▼'} ${
-                    fmtPct(q.changePct)}` : '—',
+            pctS: q.changePct != null ? fmtPct(q.changePct) : '—',
             pctN: num(q.changePct),
             dayS: q.dayLow != null && q.dayHigh != null
                 ? `${fmtPrice(q.dayLow, q.currency)} – ${fmtPrice(q.dayHigh, q.currency)}`
@@ -248,10 +246,17 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._heroPrice = new Gtk.Label({
             label: '', css_classes: ['tg-hero-price'],
         });
-        this._heroPill = new Gtk.Label({
-            label: '', css_classes: ['tg-pill', 'tg-hero-pct'],
+        // pill = shared chunky-triangle factory + text; hero gets the
+        // big size, rows and table the compact one
+        this._heroPill = new Gtk.Box({
+            css_classes: ['tg-pill', 'tg-hero-pct'],
+            spacing: 8,
             tooltip_text: 'Click to switch between $ and %',
         });
+        this._heroTri = this._makeTri(20);
+        this._heroPillLbl = new Gtk.Label({label: ''});
+        this._heroPill.append(this._heroTri);
+        this._heroPill.append(this._heroPillLbl);
         {
             const gc = new Gtk.GestureClick();
             gc.connect('pressed', () => this._flipHeroValue());
@@ -269,18 +274,53 @@ class TickerWindow extends Adw.ApplicationWindow {
         heroTop.append(this._heroPrice);
         heroTop.append(this._heroPill);
         // shown only while the hero is a search-preview not yet in the
-        // list — a fat pill (icon + words) so it's an easy target
+        // list — rides the badge (chips) line, sized to sit beside the
+        // range chips rather than shout over the price
         this._addBtn = new Gtk.Button({valign: Gtk.Align.CENTER});
         {
             const inner = new Gtk.Box({spacing: 8});
-            inner.append(new Gtk.Image({icon_name: 'list-add-symbolic'}));
+            const addImg = new Gtk.Image({icon_name: 'list-add-symbolic'});
+            addImg.set_pixel_size(14);
+            inner.append(addImg);
             inner.append(new Gtk.Label({label: 'Add to Watchlist'}));
+            // caret zone lives INSIDE the single button: one border,
+            // one radius, one height — two welded widgets could never
+            // stop drifting by a pixel
+            const sep = new Gtk.Box({css_classes: ['tg-add-sep']});
+            inner.append(sep);
+            const caretImg = new Gtk.Image({icon_name: 'pan-down-symbolic'});
+            caretImg.set_pixel_size(14);
+            inner.append(caretImg);
             this._addBtn.set_child(inner);
         }
         this._addBtn.add_css_class('tg-add');
+        this._addBtn.set_focus_on_click(false);
         this._addBtn.set_visible(false);
-        this._addBtn.connect('clicked', () => this._addSymbol(this._hero()));
-        heroTop.append(this._addBtn);
+        // position-routed clicks: left zone adds, right zone (≥36px) opens
+        this._addMenuPop = new Gtk.Popover({autohide: true});
+        this._addMenuPop.set_parent(this._addBtn);
+        this._addMenuPop.connect('show', () => this._populateAddMenu());
+        {
+            const g = new Gtk.GestureClick();
+            g.connect('pressed', (self, nPress, x, y) => {
+                if (nPress !== 1)
+                    return;
+                const w = this._addBtn.get_width();
+                if (x >= w - 36) {
+                    this._populateAddMenu();
+                    const r = new Gdk.Rectangle();
+                    r.x = w - 34;
+                    r.y = 0;
+                    r.width = 32;
+                    r.height = this._addBtn.get_height();
+                    this._addMenuPop.set_pointing_to(r);
+                    this._addMenuPop.popup();
+                } else {
+                    this._addSymbol(this._hero());
+                }
+            });
+            this._addBtn.add_controller(g);
+        }
         this._heroBox.append(heroTop);
         // badge line: directly under the name, left-flush
         {
@@ -290,9 +330,20 @@ class TickerWindow extends Adw.ApplicationWindow {
             symRow.append(this._heroSym);
             this._heroBox.append(symRow);
         }
-        this._chips = new Adw.WrapBox({margin_top: 4, line_spacing: 8,
-                                       child_spacing: 8});
-        this._heroBox.append(this._chips);
+        this._chips = new Adw.WrapBox({line_spacing: 8, child_spacing: 8,
+                                       hexpand: true,
+                                       valign: Gtk.Align.CENTER});
+        // the add button shares the badge line — as a SIBLING of the
+        // WrapBox: renderChips() rebuilds the WrapBox's children on
+        // every hero change and would wipe anything parented inside it
+        {
+            const chipRow = new Gtk.Box({
+                orientation: Gtk.Orientation.HORIZONTAL, spacing: 0,
+            });
+            chipRow.append(this._chips);
+            chipRow.append(this._addBtn);
+            this._heroBox.append(chipRow);
+        }
         chartPage.append(this._heroBox);
 
         // chart
@@ -798,12 +849,19 @@ class TickerWindow extends Adw.ApplicationWindow {
             });
             box.append(spark);
             const priceL = new Gtk.Label({label: '—', css_classes: ['numeric']});
-            const pctL = new Gtk.Label({label: '', css_classes: ['caption', 'numeric'],
+            const pctL = new Gtk.Label({label: '', css_classes: ['caption', 'numeric']});
+            // triangle + pct as one unit: the up/down class rides the
+            // container so the drawn triangle inherits the same color
+            const pctTri = this._makeTri(11);
+            const pctBox = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
+                                        spacing: 5,
                                         halign: Gtk.Align.END});
+            pctBox.append(pctTri);
+            pctBox.append(pctL);
             const praw = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL,
                                       spacing: 0});
             praw.append(priceL);
-            praw.append(pctL);
+            praw.append(pctBox);
             box.append(praw);
             // swipe-to-delete: the red ✕ rides the row's flow layout at
             // zero width until a horizontal GestureDrag pushes it in.
@@ -847,6 +905,8 @@ class TickerWindow extends Adw.ApplicationWindow {
             row.set_child(box);
             row._priceL = priceL;
             row._pctL = pctL;
+            row._pctBox = pctBox;
+            row._pctTri = pctTri;
             row._spark = spark;
             this._symList.append(row);
             this._symRows[sym] = row;
@@ -872,6 +932,138 @@ class TickerWindow extends Adw.ApplicationWindow {
         row._delBtn?.set_visible(open);
         row._delBtn?.set_size_request(open ? TG_DEL_W : -1, -1);
         this._swipeOpen = open ? row : null;
+    }
+
+    /* THE app's up/down indicator: chunky filled triangle, rounded
+     * corners, weight scaled to size — used by the hero pill, every
+     * sidebar row and the table's pct cell so one shape reads
+     * everywhere. Colour is inherited CSS (place tg-up/tg-down on an
+     * ancestor); direction is the _up JS property + queue_draw. */
+    _makeTri(size) {
+        const da = new Gtk.DrawingArea({valign: Gtk.Align.CENTER,
+                                        halign: Gtk.Align.CENTER});
+        da.set_content_width(Math.round(size * 1.0));
+        da.set_content_height(size);
+        da._up = true;
+        da.set_draw_func((w, cr, ww, hh) => {
+            let r = 0.15, g = 0.63, b = 0.41, a = 1;      // green fallback
+            if (!w._up)
+                [r, g, b] = [0.75, 0.11, 0.16];           // red fallback
+            try {
+                const c = w.get_style_context().get_color(
+                    Gtk.StateFlags.NORMAL);
+                if (c)
+                    [r, g, b, a] = [c.red, c.green, c.blue, c.alpha];
+            } catch (e) { /* fallback colors keep direction honest */ }
+            cr.setSourceRGBA(r, g, b, a);
+            cr.setLineJoin(Cairo.LineJoin.ROUND);
+            cr.setLineCap(Cairo.LineCap.ROUND);
+            // experiment switch: TG_TRI=arrow|outline|tri|disc|block
+            const shape = GLib.getenv('TG_TRI') || 'tri';
+            // outline mode needs a visible line weight of its own
+            const lw = shape === 'outline' ? Math.max(1.8, size / 8)
+                                           : Math.max(1.2, size / 14);
+            cr.setLineWidth(lw);
+            cr.setLineJoin(Cairo.LineJoin.ROUND);
+            cr.setLineCap(Cairo.LineCap.ROUND);
+            const p = lw / 2 + 1;
+            if (shape === 'block') {
+                // bold block arrow (user reference): deep chevron head
+                // with squared outer wings, wide stem, hard miter
+                // corners — drawn pointing down, flipped for gainers
+                cr.setLineJoin(Cairo.LineJoin.MITER);
+                if (w._up) {
+                    cr.translate(ww / 2, hh / 2);
+                    cr.rotate(Math.PI);
+                    cr.translate(-ww / 2, -hh / 2);
+                }
+                const bp = 1.2, sw = ww * 0.12;
+                // proportions measured off the reference: stem junction
+                // high (27%), long vertical wing walls (~31%), narrow stem
+                const jy = p + (hh - 2 * p) * 0.27;
+                const wd = (hh - 2 * p) * 0.31;
+                cr.moveTo(ww / 2 - sw, p);
+                cr.lineTo(ww / 2 + sw, p);
+                cr.lineTo(ww / 2 + sw, jy);
+                cr.lineTo(ww - bp, jy);
+                cr.lineTo(ww - bp, jy + wd);
+                cr.lineTo(ww / 2, hh - bp);
+                cr.lineTo(bp, jy + wd);
+                cr.lineTo(bp, jy);
+                cr.lineTo(ww / 2 - sw, jy);
+                cr.closePath();
+                cr.fill();
+                return;
+            }
+            if (!w._up) {
+                // mirror about the centre: draw the up form, flipped
+                cr.translate(ww / 2, hh / 2);
+                cr.rotate(Math.PI);
+                cr.translate(-ww / 2, -hh / 2);
+            }
+            if (shape === 'disc') {
+                // badge style (user reference): filled colour disc with
+                // a solid white arrow punched into it — reads at any size
+                const rad = Math.min(ww, hh) / 2 - 1;
+                cr.arc(ww / 2, hh / 2, rad, 0, 2 * Math.PI);
+                cr.fill();
+                cr.setSourceRGBA(1, 1, 1, 1);
+                cr.save();
+                cr.translate(ww / 2, hh / 2);
+                const ah = rad * 0.62;          // arrow tip above centre
+                const aw = ah * 0.92;           // head half width
+                const sw = aw * 0.38;           // stem half width
+                cr.setLineWidth(1);
+                cr.moveTo(0, -ah);
+                cr.lineTo(aw, ah * 0.12);
+                cr.lineTo(sw, ah * 0.12);
+                cr.lineTo(sw, ah * 0.95);
+                cr.lineTo(-sw, ah * 0.95);
+                cr.lineTo(-sw, ah * 0.12);
+                cr.lineTo(-aw, ah * 0.12);
+                cr.closePath();
+                cr.fillPreserve();
+                cr.stroke();                    // white bloom: round corners
+                cr.restore();
+            } else if (shape === 'tri') {
+                // rounded triangle with a dark rim drawn BEHIND: stroke
+                // wide first (dark), then fill bright over the inner
+                // half — a centered fat stroke would eat the fill at
+                // small sizes
+                const lw = Math.max(2, size / 9);
+                cr.setLineWidth(lw * 2);
+                const tp = Math.max(2, size / 8);
+                cr.moveTo(ww / 2, tp);
+                cr.lineTo(ww - tp, hh - tp);
+                cr.lineTo(tp, hh - tp);
+                cr.closePath();
+                cr.setSourceRGBA(r * 0.45, g * 0.45, b * 0.45, a);
+                cr.strokePreserve();
+                cr.setSourceRGBA(r, g, b, a);
+                cr.fill();
+                return;
+            } else {
+                // solid arrow: head + stem, rounded by the fat stroke
+                const cx = ww / 2;
+                const shoulder = p + (hh - 2 * p) * 0.45;
+                const stem = (ww / 2 - p) * 0.27;
+                cr.moveTo(cx, p);
+                cr.lineTo(ww - p, shoulder);
+                cr.lineTo(cx + stem, shoulder);
+                cr.lineTo(cx + stem, hh - p);
+                cr.lineTo(cx - stem, hh - p);
+                cr.lineTo(cx - stem, shoulder);
+                cr.lineTo(p, shoulder);
+            }
+            cr.closePath();
+            if (shape === 'outline')
+                cr.stroke();     // hollow — the pill gradient shows through
+            else {
+                cr.fillPreserve();
+                cr.stroke();
+            }
+        });
+        return da;
     }
 
     /* The row's one GestureDrag, claimed outright at begin. The axis of
@@ -1051,13 +1243,14 @@ class TickerWindow extends Adw.ApplicationWindow {
             row._priceL.set_text(q?.price != null
                 ? fmtPrice(q.price, q.currency) : '—');
             row._pctL.set_text(q?.changePct != null
-                ? `${(q.change ?? q.changePct) >= 0 ? '▲' : '▼'} ${
-                    fmtPct(q.changePct)}`
-                : '');
-            row._pctL.remove_css_class('tg-up');
-            row._pctL.remove_css_class('tg-down');
+                ? fmtPct(q.changePct) : '');
+            const pUp = (q?.change ?? q?.changePct ?? 0) >= 0;
+            row._pctTri._up = pUp;
+            row._pctTri.queue_draw();
+            row._pctBox.remove_css_class('tg-up');
+            row._pctBox.remove_css_class('tg-down');
             if (q?.change != null)
-                row._pctL.add_css_class(q.change >= 0 ? 'tg-up' : 'tg-down');
+                row._pctBox.add_css_class(pUp ? 'tg-up' : 'tg-down');
             row._spark.queue_draw();
         }
         const heroRow = this._symRows[this._hero()];
@@ -1104,6 +1297,57 @@ class TickerWindow extends Adw.ApplicationWindow {
         if (this._settings.get_string('active-watchlist') === id)
             this._settings.set_string('active-watchlist', lists[0].id);
         this._toast('List deleted');
+    }
+
+    /* commit a previewed symbol to a specific list (split-button menu) */
+    _addSymbolTo(symbol, listId) {
+        const lists = this._lists();
+        const wl = lists.find(w => w.id === listId);
+        if (!wl || wl.symbols.includes(symbol))
+            return;
+        wl.symbols.push(symbol);
+        this._writeLists(lists);
+        this._toast(`${symbol} → ${wl.name || 'list'}`);
+    }
+
+    /* rebuild the split-button popover: fresh symbol + list membership */
+    _populateAddMenu() {
+        const sym = this._hero();
+        const box = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL, spacing: 2,
+        });
+        box.set_margin_top(6);
+        box.set_margin_bottom(6);
+        box.set_margin_start(6);
+        box.set_margin_end(6);
+        const item = (label, fn) => {
+            const b = new Gtk.Button({
+                label, css_classes: ['flat'], hexpand: true,
+            });
+            try {
+                b.set_halign(Gtk.Align.FILL);
+                const l = b.get_child();
+                if (l && l.set_xalign)
+                    l.set_xalign(0);
+            } catch (e) { /* alignment is polish */ }
+            b.connect('clicked', () => {
+                this._addMenuPop.popdown();
+                fn();
+            });
+            box.append(b);
+        };
+        if (sym) {
+            for (const w of this._lists()) {
+                if (!w.symbols.includes(sym))
+                    item(`Add to ${w.name || w.id}`,
+                        () => this._addSymbolTo(sym, w.id));
+            }
+            item('Copy symbol', () => {
+                this.clipboard.set_text(sym, -1);
+                this._toast(`${sym} copied`);
+            });
+        }
+        this._addMenuPop.set_child(box);
     }
 
     _addSymbol(symbol) {
@@ -1490,6 +1734,25 @@ class TickerWindow extends Adw.ApplicationWindow {
                     lbl.add_css_class('numeric');
                 if (def.color)
                     lbl.add_css_class(item.up ? 'tg-up' : 'tg-down');
+                if (def.key === 'pct') {
+                    // same chunky triangle as hero + sidebar; colour
+                    // rides the container so the triangle inherits it
+                    const tri = this._makeTri(11);
+                    tri._up = !!item.up;
+                    const cbox = new Gtk.Box({
+                        orientation: Gtk.Orientation.HORIZONTAL,
+                        spacing: 5,
+                        halign: def.numeric ? Gtk.Align.END
+                                            : Gtk.Align.START,
+                    });
+                    cbox.add_css_class(item.up ? 'tg-up' : 'tg-down');
+                    lbl.remove_css_class('tg-up');
+                    lbl.remove_css_class('tg-down');
+                    cbox.append(tri);
+                    cbox.append(lbl);
+                    box.append(cbox);
+                    continue;
+                }
                 box.append(lbl);
             }
             row.set_child(box);
@@ -1906,6 +2169,10 @@ class TickerWindow extends Adw.ApplicationWindow {
             ?? (this._previewQ?.symbol === sym ? this._previewQ : null);
         const hist = this._hist;
         this._addBtn.set_visible(this.isPreview());
+        // build the menu BEFORE the button shows: a popover populated
+        // only at show-time measures zero and auto-hides instantly
+        if (this.isPreview())
+            this._populateAddMenu();
         this._addBtn.set_tooltip_text(
             `Add ${sym} to “${this._activeList()?.name ?? 'Watchlist'}”`);
         this._repaintTitle();
@@ -1926,7 +2193,7 @@ class TickerWindow extends Adw.ApplicationWindow {
 
         if (!q) {
             this._heroPrice.set_label('');
-            this._heroPill.set_label('');
+            this._heroPillLbl.set_label('');
             renderChips(this._chips, []);
             return;
         }
@@ -1954,9 +2221,10 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._heroPill.set_visible(chg != null);
         this._heroPill.set_css_classes(['tg-pill', 'tg-hero-pct',
                                         up ? 'tg-up-soft' : 'tg-down-soft']);
-        this._heroPill.set_label(chg != null
-            ? `${up ? '▲' : '▼'} ${showPct
-                ? fmtPct(pct) : fmtDelta(chg, q.currency)}${
+        this._heroTri._up = up;
+        this._heroTri.queue_draw();
+        this._heroPillLbl.set_label(chg != null
+            ? `${showPct ? fmtPct(pct) : fmtDelta(chg, q.currency)}${
                 tag ? ` · ${tag}` : ''}`
             : '');
         this._heroPrice.set_css_classes(['tg-hero-price',
