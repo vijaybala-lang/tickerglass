@@ -322,28 +322,31 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._addBtn.add_controller(g);
         }
         this._heroBox.append(heroTop);
-        // badge line: directly under the name, left-flush
+        // badge line: directly under the name, left-flush; the add
+        // button rides here beside the symbol badge — the commit button
+        // for the very symbol it names
         {
             const symRow = new Gtk.Box({
-                orientation: Gtk.Orientation.HORIZONTAL,
+                orientation: Gtk.Orientation.HORIZONTAL, spacing: 10,
             });
+            this._heroSym.set_valign(Gtk.Align.CENTER);
             symRow.append(this._heroSym);
+            symRow.append(this._addBtn);
+            // the row keeps the button's height even after the button
+            // vanishes post-add, so the badges below never jump
+            const nat = this._addBtn.measure(
+                Gtk.Orientation.VERTICAL, -1)[1];
+            if (nat > 12)
+                symRow.set_size_request(-1, nat);
             this._heroBox.append(symRow);
         }
         this._chips = new Adw.WrapBox({line_spacing: 8, child_spacing: 8,
                                        hexpand: true,
                                        valign: Gtk.Align.CENTER});
-        // the add button shares the badge line — as a SIBLING of the
-        // WrapBox: renderChips() rebuilds the WrapBox's children on
-        // every hero change and would wipe anything parented inside it
-        {
-            const chipRow = new Gtk.Box({
-                orientation: Gtk.Orientation.HORIZONTAL, spacing: 0,
-            });
-            chipRow.append(this._chips);
-            chipRow.append(this._addBtn);
-            this._heroBox.append(chipRow);
-        }
+        this._chips.set_margin_top(8);   // air between badge line + chips
+        // the WrapBox rebuilds its children on every hero change
+        // (renderChips), so nothing else may be parented inside it
+        this._heroBox.append(this._chips);
         chartPage.append(this._heroBox);
 
         // chart
@@ -924,6 +927,9 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._ghost.set_visible(false);   // stale during a rebuild
         this._clearDropLine();
         this._repaintTitle();
+        // what the UI now reflects: the watchlists watcher diffs against
+        // this to tell add/remove from rename/reorder
+        this._uiSymbols = [...(wl?.symbols ?? [])];
     }
 
     /* swipe-to-delete state: at most one row is open. The button takes
@@ -957,8 +963,9 @@ class TickerWindow extends Adw.ApplicationWindow {
             if (!w._up)
                 [r, g, b] = [0.75, 0.11, 0.16];           // red fallback
             try {
-                const c = w.get_style_context().get_color(
-                    Gtk.StateFlags.NORMAL);
+                // GTK 4.20: get_color() takes no flags anymore (it reads
+                // the widget's current state); passing one spams warnings
+                const c = w.get_style_context().get_color();
                 if (c)
                     [r, g, b, a] = [c.red, c.green, c.blue, c.alpha];
             } catch (e) { /* fallback colors keep direction honest */ }
@@ -1938,6 +1945,50 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._updateHero();
     }
 
+    /* targeted quote round for symbols just added to the active list:
+     * existing rows stay untouched, only the new ticker crosses the
+     * network, the hero and its chart are never reloaded */
+    _fetchAdded(syms) {
+        if (this._busy) {
+            // an in-flight full round already fetches the pre-add set;
+            // re-queue so it runs again over the post-add one
+            this._queued = true;
+            return;
+        }
+        this._spinner.set_visible(true);
+        this._client.quotes(syms,
+                            {sparkRange: '1mo',
+                             onQuote: q => this._partialQuote(q)})
+            .then(res => {
+                if (this._dead)
+                    return;
+                for (const q of res.quotes) {
+                    const i = this._quotes.findIndex(
+                        x => x.symbol === q.symbol);
+                    if (i >= 0)
+                        this._quotes[i] = q;
+                    else
+                        this._quotes.push(q);
+                }
+                this._spinner.set_visible(false);
+                if (this._tablePend) {
+                    GLib.source_remove(this._tablePend);
+                    this._tablePend = 0;
+                }
+                this._refreshTable();
+                this._updateWatchRows();
+                if (syms.includes(this._hero()))
+                    this._updateHero();
+            })
+            .catch(e => {
+                if (this._dead)
+                    return;
+                logError(e, 'TickerGlass app');
+                this._spinner.set_visible(false);
+                this._refresh(true);   // fall back to the full round
+            });
+    }
+
     async _loadHistory() {
         const sym = this._hero();
         if (!sym)
@@ -2419,16 +2470,38 @@ class TickerWindow extends Adw.ApplicationWindow {
 
     _onSetting(key) {
         switch (key) {
-        case 'watchlists':
+        case 'watchlists': {
             if (this._dragging) {
                 // a fan-out landing mid-drag must not destroy the row
                 // under the pointer — settle it at drag-end instead
                 this._dragPending = true;
                 break;
             }
+            // incremental: adding a symbol must not refetch the 11 quotes
+            // that are already fresh, drop the table, or reload the hero
+            const after = this._activeList()?.symbols ?? [];
+            const before = this._uiSymbols ?? [];
+            const added = after.filter(s => !before.includes(s));
+            const removed = before.filter(s => !after.includes(s));
             this._rebuildSidebar();
-            this._refresh(true);
+            if (removed.length)
+                this._quotes = this._quotes.filter(
+                    q => !removed.includes(q.symbol));
+            if (added.length)
+                this._fetchAdded(added);
+            else if (removed.length) {
+                // a removal needs no network — repaint from cached quotes
+                if (this._tablePend) {
+                    GLib.source_remove(this._tablePend);
+                    this._tablePend = 0;
+                }
+                this._refreshTable();
+                this._updateHero();
+            }
+            // rename / reorder / other lists' edits: sidebar rebuild above
+            // is the whole story; the right panel is untouched
             break;
+        }
         case 'active-watchlist':
             this._rebuildSidebar();
             this._refresh(true);
