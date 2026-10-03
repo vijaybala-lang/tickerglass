@@ -41,6 +41,12 @@ sed "s|@TICKERGLASS_DIR@|$APPDEST|" \
 command -v update-desktop-database >/dev/null && \
     update-desktop-database "$DATA/applications" || true
 
+# ── icon: generate + install into the user hicolor theme ─────────────────
+if command -v gjs >/dev/null; then
+    TG_ICON_OUT="$DATA/icons" gjs -m "$ROOT/tools/gen-icon.mjs" >/dev/null \
+        || echo "note: icon generation failed (launcher shows a fallback)"
+fi
+
 gnome-extensions enable "$UUID" 2>/dev/null || true
 
 echo
