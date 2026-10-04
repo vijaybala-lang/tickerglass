@@ -19,10 +19,19 @@ export function textPrompt({parent, title, initial = '',
                              spacing: 10});
     const entry = new Adw.EntryRow({title, text: initial});
     box.append(entry);
-    const btn = new Gtk.Button({label: acceptLabel,
-                                halign: Gtk.Align.CENTER});
+    // Cancel + Accept as an even two-button row: Adw.Dialog honors
+    // Escape via can_close, but a dialog with only a suggested-action
+    // button leaves no visible way OUT — the eye goes to buttons.
+    const btnRow = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
+                                spacing: 6});
+    const cancel = new Gtk.Button({label: _('Cancel'), hexpand: true});
+    cancel.add_css_class('flat');
+    cancel.connect('clicked', () => dlg.force_close());
+    const btn = new Gtk.Button({label: acceptLabel, hexpand: true});
     btn.add_css_class('suggested-action');
-    box.append(btn);
+    btnRow.append(cancel);
+    btnRow.append(btn);
+    box.append(btnRow);
 
     let done = false;
     const accept = () => {
