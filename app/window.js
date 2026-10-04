@@ -2098,7 +2098,12 @@ class TickerWindow extends Adw.ApplicationWindow {
                                   halign: Gtk.Align.START}));
         const cur = this._settings.get_string('spark-range');
         const sparkSec = (id, label) => item(null, label,
-            () => this._sparkAction?.set_state(
+            // activate(), NOT set_state(): set_state on a stateful
+            // action is the quiet display-update — it never emits
+            // change-state, so the handler that writes the setting
+            // (and re-kicks the quote round) never ran. activate
+            // with a target is exactly what a menu radio does.
+            () => this._sparkAction?.activate(
                 new GLib.Variant('s', id)),
             cur === id);
         sparkSec('1d', '1 day');
