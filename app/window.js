@@ -681,11 +681,14 @@ class TickerWindow extends Adw.ApplicationWindow {
         // page title names the window the ranking actually used
         this._movTitle = new Gtk.Label({label: '', xalign: 0,
                                         css_classes: ['title-3'],
+                                        // 10 grid margin + 14 card padding
+                                        // = aligned with tile text
+                                        margin_start: 24,
                                         margin_bottom: 2});
         movWrap.append(this._movTitle);
         this._movSummary = new Gtk.Label({label: 'Waiting for quotes…',
                                           xalign: 0, hexpand: true,
-                                          ellipsize: 3,
+                                          ellipsize: 3, margin_start: 24,
                                           css_classes: ['dim-label',
                                                         'caption']});
         movHeadRow.append(this._movSummary);
@@ -732,7 +735,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         for (const key of ['gain', 'lose']) {
             const head = new Gtk.Label({label: '', xalign: 0,
                                         css_classes: ['heading'],
-                                        margin_start: 14, margin_top: 10,
+                                        margin_start: 24, margin_top: 10,
                                         margin_bottom: 2});
             movCol.append(head);
             this._movHeads[key] = head;
@@ -756,7 +759,7 @@ class TickerWindow extends Adw.ApplicationWindow {
             movCol.append(fb);
             this._movLists[key] = fb;
             const empty = new Gtk.Label({label: '', css_classes: ['dim-label'],
-                                         margin_start: 14,
+                                         margin_start: 24,
                                          margin_top: 8, margin_bottom: 8});
             empty.set_visible(false);
             movCol.append(empty);
