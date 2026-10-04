@@ -1467,6 +1467,14 @@ class TickerWindow extends Adw.ApplicationWindow {
             delBtn.set_visible(false);
             delBtn.add_css_class('tg-del-reveal');
             delBtn.add_css_class('pill');
+            // the row paints an all-scroll grab cursor over itself
+            // (it IS drag-reorderable); the pill is a button, not a
+            // handle — hand it the pointer hand so hover says
+            // “click”, matching every other button in the app
+            try {
+                delBtn.set_cursor(
+                    Gdk.Cursor.new_from_name('pointer', null));
+            } catch (e) { /* themed cursors are polish */ }
             delBtn.connect('clicked', () => {
                 this._setSwipe(row, false);
                 this._removeSymbol(sym);

@@ -239,7 +239,9 @@ window { font-family: Inter, Cantarell, sans-serif; }
   min-height: 26px;
   margin: 4px 4px 4px 0;
 }
-.tg-del-reveal:hover { background: alpha(#c01c28, 0.85); }
+/* hover DEEPENS the red (the old alpha lift read lighter over pale
+ * rows — hover should press in, not fade out) */
+.tg-del-reveal:hover { background: #9d1722; }
 
 /* chart card */
 .tg-chart-area { border-radius: 16px; }
