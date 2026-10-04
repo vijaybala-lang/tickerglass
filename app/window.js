@@ -228,9 +228,9 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._loadNews(this._hero());
         }
         this._restartTimer();
-        // TG_VIEW=table|chart forces the initial view (dev/testing hook)
+        // TG_VIEW=table|chart|movers forces the initial view (dev/testing hook)
         const view0 = GLib.getenv('TG_VIEW');
-        if (view0 === 'table' || view0 === 'chart')
+        if (['table', 'chart', 'movers'].includes(view0))
             this._stack.set_visible_child_name(view0);
         // TG_READER_URL opens the news reader at startup (dev/testing hook)
         const reader0 = GLib.getenv('TG_READER_URL');
@@ -331,6 +331,23 @@ class TickerWindow extends Adw.ApplicationWindow {
         hbar.pack_end(search);
         this._searchEntry = search;
         this._buildSearchPopover(search);
+        // page navigation right beside the search: Watchlist ↔ Movers.
+        // tg-chip pills keep it in the app's own design language.
+        const navBox = new Gtk.Box({spacing: 6, valign: Gtk.Align.CENTER});
+        this._navChips = {};
+        for (const [key, label, tip, view] of [
+                ['watch', 'Watchlist', 'Your symbols  ( Alt+1 )', 'chart'],
+                ['movers', 'Movers', 'Gainers and losers  ( Alt+2 )',
+                 'movers']]) {
+            const b = new Gtk.Button({label, css_classes: ['tg-chip'],
+                                      tooltip_text: tip});
+            b.connect('clicked', () =>
+                this.activate_action('view', new GLib.Variant('s', view)));
+            navBox.append(b);
+            this._navChips[key] = b;
+        }
+        hbar.pack_end(navBox);
+        this._navBox = navBox;
         if (GLib.getenv('TG_DEBUGKEYS')) {
             const mk = (name, wid) => {
                 const kc = new Gtk.EventControllerKey();
@@ -652,20 +669,71 @@ class TickerWindow extends Adw.ApplicationWindow {
 
         /* —— view stack + header toggles —— */
         const tablePage = wrap;
+
+        /* —— movers: gains/losses dashboard off the SAME quotes map —
+         * zero extra network; rebuilt on every table flush, and a row
+         * click hands the symbol back to the chart view */
+        const movWrap = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL,
+                                     margin_start: 12, margin_end: 12,
+                                     margin_top: 8, spacing: 2});
+        this._movSummary = new Gtk.Label({label: 'Waiting for quotes…',
+                                          xalign: 0,
+                                          css_classes: ['dim-label',
+                                                        'caption']});
+        movWrap.append(this._movSummary);
+        const movScroll = new Gtk.ScrolledWindow({
+            vexpand: true, hscrollbar_policy: Gtk.PolicyType.NEVER,
+            margin_top: 4,
+        });
+        const movCol = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL});
+        movScroll.set_child(movCol);
+        movWrap.append(movScroll);
+        this._movHeads = {};
+        this._movLists = {};
+        this._movEmpties = {};
+        for (const key of ['gain', 'lose']) {
+            const head = new Gtk.Label({label: '', xalign: 0,
+                                        css_classes: ['heading'],
+                                        margin_start: 14, margin_top: 10,
+                                        margin_bottom: 2});
+            movCol.append(head);
+            this._movHeads[key] = head;
+            const list = new Gtk.ListBox({css_classes: ['tg-news-list']});
+            list.add_css_class('flat');
+            list.set_selection_mode(Gtk.SelectionMode.NONE);
+            const empty = new Gtk.Label({label: '', css_classes: ['dim-label'],
+                                         margin_top: 8, margin_bottom: 8});
+            empty.set_visible(false);
+            list.set_placeholder(empty);
+            this._movEmpties[key] = empty;
+            list.connect('row-activated', (l, row) => {
+                if (!row?._sym)
+                    return;
+                this._selectSymbol(row._sym);
+                this._stack.set_visible_child_name('chart');
+            });
+            movCol.append(list);
+            this._movLists[key] = list;
+        }
+        const moversPage = movWrap;
+
         this._stack = new Gtk.Stack({
             vexpand: true, transition_type: Gtk.StackTransitionType.SLIDE_LEFT_RIGHT,
             transition_duration: 180,
         });
         this._stack.add_titled(chartPage, 'chart', 'Chart');
         this._stack.add_titled(tablePage, 'table', 'Table');
+        this._stack.add_titled(moversPage, 'movers', 'Movers');
+        this._updateNavChips();   // boot with Watchlist wearing the pill
         content.append(this._stack);
         this._stack.connect('notify::visible-child-name', () => {
             const p = this._stack.get_visible_child_name();
-            if (p === 'chart' || p === 'table')
+            if (p === 'chart' || p === 'table' || p === 'movers')
                 this._viewAction?.set_state(new GLib.Variant('s', p));
+            this._updateNavChips();
             // the reader owns the whole pane: swap the ticker chrome out
             const reading = p === 'reader';
-            for (const w of [sideBtn, menuBtn, search])
+            for (const w of [sideBtn, menuBtn, search, navBox])
                 w.set_visible(!reading);
             if (reading)
                 this._searchPop?.popdown();
@@ -801,6 +869,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         const viewM = new Gio.Menu();
         viewM.append('Chart', 'win.view::chart');
         viewM.append('Table', 'win.view::table');
+        viewM.append('Movers', 'win.view::movers');
         menu.append_section('View', viewM);
 
         const src = new Gio.Menu();
@@ -873,6 +942,14 @@ class TickerWindow extends Adw.ApplicationWindow {
         });
         this.add_action(view);
         this._viewAction = view;
+        // Alt+digits are safe accelerators (unlike bare keys, they can
+        // never be typed into the search entry). Accels live on the app.
+        const app = this.get_application();
+        if (app) {
+            app.set_accels_for_action('win.view::chart', ['<alt>1']);
+            app.set_accels_for_action('win.view::movers', ['<alt>2']);
+            app.set_accels_for_action('win.view::table', ['<alt>3']);
+        }
         act('sidebar', null, () =>
             this._split.set_show_sidebar(!this._split.show_sidebar));
         act('newlist', null, () => this._newListDialog());
@@ -1994,6 +2071,109 @@ class TickerWindow extends Adw.ApplicationWindow {
         if (_t)
             log(`TG table rebuild: ${sorted.length} rows in ` +
                 `${((GLib.get_monotonic_time() - _t) / 1e3).toFixed(1)}ms`);
+        this._refreshMovers();
+    }
+
+    /* keep the header chips honest: whichever page is up wears the
+     * active pill (reader hides the whole row, so it never shows) */
+    _updateNavChips() {
+        if (!this._navChips)
+            return;
+        const movers = this._stack?.get_visible_child_name() === 'movers';
+        this._navChips.watch.set_css_classes(
+            movers ? ['tg-chip'] : ['tg-chip', 'tg-chip-active']);
+        this._navChips.movers.set_css_classes(
+            movers ? ['tg-chip', 'tg-chip-active'] : ['tg-chip']);
+    }
+
+    /* rebuild the movers dashboard from the in-memory quote map: the
+     * watchlist round already fetched everything, so this view costs
+     * zero extra network — only when it's actually on screen or a
+     * round just landed (cheap at ≤ a few dozen symbols either way) */
+    _refreshMovers() {
+        if (!this._movLists)
+            return;
+        const syms = this._activeList()?.symbols ?? [];
+        const qs = syms.map(s => this._quoteOf(s))
+                       .filter(q => q && !q.error && q.price != null &&
+                                    q.changePct != null);
+        const up = qs.filter(q => q.changePct > 0)
+                     .sort((a, b) => b.changePct - a.changePct);
+        const down = qs.filter(q => q.changePct < 0)
+                       .sort((a, b) => a.changePct - b.changePct);
+        const state = (this._quoteOf(this._hero()) ?? qs[0])?.state;
+        const ses = state === 'POST' ? 'After-hours'
+                  : state === 'PRE' ? 'Pre-market' : '';
+        const top = ses || 'Top';
+        this._movHeads.gain.set_text(`${top} gainers`);
+        this._movHeads.lose.set_text(`${top} losers`);
+        const flat = qs.length - up.length - down.length;
+        this._movSummary.set_text(qs.length
+            ? `${qs.length} tracked · ${up.length} gaining · ` +
+              `${down.length} losing` + (flat ? ` · ${flat} flat` : '')
+            : 'Waiting for quotes…');
+        this._fillMovers('gain', up,
+            qs.length ? 'Nothing in the green yet today' : '');
+        this._fillMovers('lose', down,
+            qs.length ? 'No decliners — everything holding up' : '');
+    }
+
+    _fillMovers(key, quotes, emptyText) {
+        const list = this._movLists[key];
+        let c = list.get_last_child();
+        while (c !== null) {
+            list.remove(c);
+            c = list.get_last_child();
+        }
+        for (const q of quotes.slice(0, 8))
+            list.append(this._moversRow(q));
+        const ph = this._movEmpties[key];
+        ph.set_text(emptyText);
+        ph.set_visible(!quotes.length && !!emptyText);
+    }
+
+    _moversRow(q) {
+        const row = new Gtk.ListBoxRow();
+        row._sym = q.symbol;
+        const line = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
+                                  spacing: 10, margin_start: 12,
+                                  margin_end: 12, margin_top: 8,
+                                  margin_bottom: 8});
+        const symL = new Gtk.Label({label: q.symbol, xalign: 0});
+        symL.add_css_class('tg-row-sym');
+        line.append(symL);
+        const nameL = new Gtk.Label({label: q.name || q.symbol, xalign: 0,
+                                     ellipsize: 3, hexpand: true,
+                                     max_width_chars: 26,
+                                     css_classes: ['dim-label']});
+        line.append(nameL);
+        if (q.spark?.length > 1) {
+            const sp = new Gtk.DrawingArea({content_width: 56,
+                                            content_height: 22,
+                                            valign: Gtk.Align.CENTER});
+            const up = (q.change ?? 0) >= 0;
+            const vals = q.spark;
+            sp.set_draw_func((a, cr, w, h) =>
+                paintMiniSpark(cr, {w, h, values: vals, up}));
+            line.append(sp);
+        }
+        const priceL = new Gtk.Label({label: fmtPrice(q.price, q.currency),
+                                      css_classes: ['numeric']});
+        line.append(priceL);
+        // the one triangle+pill idiom, compact size, like every other
+        // up/down read in the app
+        const pill = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
+                                  spacing: 5, valign: Gtk.Align.CENTER,
+                                  css_classes: ['tg-pill']});
+        pill.add_css_class(q.changePct >= 0 ? 'tg-up' : 'tg-down');
+        const tri = this._makeTri(11);
+        tri._up = q.changePct >= 0;
+        pill.append(tri);
+        pill.append(new Gtk.Label({label: fmtPct(q.changePct),
+                                   css_classes: ['numeric']}));
+        line.append(pill);
+        row.set_child(line);
+        return row;
     }
 
     /* ── data flow ────────────────────────────────────────────────────── */
