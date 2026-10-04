@@ -346,14 +346,16 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._searchEntry = search;
         this._buildSearchPopover(search);
         // page navigation right beside the search: Watchlist ↔ Movers.
-        // tg-chip pills keep it in the app's own design language.
-        const navBox = new Gtk.Box({spacing: 6, valign: Gtk.Align.CENTER});
+        // Browser-style tabs (.tg-tab): the active one wears the page
+        // background and sits flush with the toolbar seam.
+        const navBox = new Gtk.Box({spacing: 3, valign: Gtk.Align.END,
+                                    margin_bottom: 0, margin_top: 6});
         this._navChips = {};
         for (const [key, label, tip, view] of [
                 ['watch', 'Watchlist', 'Your symbols  ( Alt+1 )', 'chart'],
                 ['movers', 'Movers', 'Gainers and losers  ( Alt+2 )',
                  'movers']]) {
-            const b = new Gtk.Button({label, css_classes: ['tg-chip'],
+            const b = new Gtk.Button({label, css_classes: ['tg-tab'],
                                       tooltip_text: tip});
             b.connect('clicked', () =>
                 this.activate_action('view', new GLib.Variant('s', view)));
@@ -2297,9 +2299,9 @@ class TickerWindow extends Adw.ApplicationWindow {
             return;
         const movers = this._stack?.get_visible_child_name() === 'movers';
         this._navChips.watch.set_css_classes(
-            movers ? ['tg-chip'] : ['tg-chip', 'tg-chip-active']);
+            movers ? ['tg-tab'] : ['tg-tab', 'tg-tab-active']);
         this._navChips.movers.set_css_classes(
-            movers ? ['tg-chip', 'tg-chip-active'] : ['tg-chip']);
+            movers ? ['tg-tab', 'tg-tab-active'] : ['tg-tab']);
     }
 
     /* rebuild the movers dashboard from the in-memory quote map: the

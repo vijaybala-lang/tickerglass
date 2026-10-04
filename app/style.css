@@ -96,6 +96,33 @@ window { font-family: Inter, Cantarell, sans-serif; }
   border-color: alpha(currentcolor, 0.35);
 }
 
+/* browser-style page tabs (Watchlist | Movers in the header):
+ * inactive tabs quiet and borderless, hover raises a soft rounded
+ * rect, and the ACTIVE tab wears the page's own background with
+ * rounded top corners and a negative bottom margin so it bites
+ * into the toolbar seam and reads as the content below rising
+ * up into the bar — Chrome/Firefox logic, libadwaita tokens so
+ * light and dark both stay correct */
+.tg-tab {
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 5px 16px 6px;
+  margin: 0 0 -6px;
+  min-height: 0;
+  border-radius: 12px 12px 0 0;
+  font-weight: 600;
+  opacity: 0.78;
+}
+.tg-tab:hover:not(.tg-tab-active) {
+  background: alpha(currentcolor, 0.07);
+  opacity: 1;
+}
+.tg-tab-active {
+  background: @window_bg_color;
+  opacity: 1;
+}
+
 /* static stat chips under the hero price */
 .tg-chip-static {
   padding: 1px 10px;
