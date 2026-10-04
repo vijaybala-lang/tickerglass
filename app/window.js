@@ -988,8 +988,12 @@ class TickerWindow extends Adw.ApplicationWindow {
         // widget riding an overlay — it never reparents the row under
         // the pointer grab (which is what killed the paint before)
         {
-            const symOv = new Gtk.Overlay();
-            symOv.set_child(this._symList);
+            const symOv = new Gtk.Overlay({vexpand: true});
+            // overlay OUTSIDE the scroller (scroller is the overlay's
+            // main child): pill / drop-bar / ghost float over the
+            // VIEWPORT and hold position while the list scrolls —
+            // nested inside, they rode the content away
+            symOv.set_child(symScroll);
             this._symOv = symOv;
             this._symAdj = symScroll.get_vadjustment();
             // the drop-position bar: a real overlay widget, not a box-
@@ -1027,9 +1031,8 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._ghost.append(this._ghostLbl);
             this._ghost.set_visible(false);
             symOv.add_overlay(this._ghost);
-            symScroll.set_child(symOv);
+            sideBox.append(symOv);
         }
-        sideBox.append(symScroll);
         /* resize grip: a thin strip riding the sidebar's right edge.
          * OverlaySplitView sizes the sidebar from a WIDTH FACTOR, so
          * the drag converts pixels -> factor over the live split
