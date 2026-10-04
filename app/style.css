@@ -243,6 +243,18 @@ window { font-family: Inter, Cantarell, sans-serif; }
  * rows — hover should press in, not fade out) */
 .tg-del-reveal:hover { background: #9d1722; }
 
+/* loading pill floating over the top of the sidebar list (overlay
+ * child: zero layout shift). Card-tinted capsule with a real
+ * spinner — announces rounds slower than _setSpinner's 350ms grace */
+.tg-loadpill {
+  background: alpha(@card_bg_color, 0.95);
+  border: 1px solid alpha(#000000, 0.14);
+  border-radius: 999px;
+  padding: 4px 12px;
+  margin-top: 8px;
+  box-shadow: 0 2px 8px alpha(#000000, 0.20);
+}
+
 /* chart card */
 .tg-chart-area { border-radius: 16px; }
 

@@ -1005,6 +1005,20 @@ class TickerWindow extends Adw.ApplicationWindow {
             });
             this._dropBar.set_visible(false);
             symOv.add_overlay(this._dropBar);
+            // “Updating quotes…” pill: floats at the top of the list
+            // (overlay child — the rows never jump when it appears),
+            // driven by _setSpinner with a 350ms grace so fast
+            // rounds never flash it
+            this._loadPill = new Gtk.Box({
+                css_classes: ['tg-loadpill'], spacing: 6,
+                halign: Gtk.Align.CENTER, valign: Gtk.Align.START,
+            });
+            this._loadSpin = new Gtk.Spinner();
+            this._loadPill.append(this._loadSpin);
+            this._loadPill.append(new Gtk.Label({
+                label: 'Updating quotes…', css_classes: ['caption']}));
+            this._loadPill.set_visible(false);
+            symOv.add_overlay(this._loadPill);
             this._ghost = new Gtk.Box({
                 css_classes: ['tg-ghost'],
                 halign: Gtk.Align.START, valign: Gtk.Align.START,
@@ -1548,6 +1562,32 @@ class TickerWindow extends Adw.ApplicationWindow {
     /* swipe-to-delete state: at most one row is open. The button takes
      * real width in the row's hbox (content compresses) — cheap and
      * flicker-free against overlays on transparent rows. */
+    /* round-trip busy switch: header spinner (immediate) + the
+     * sidebar's pill. The pill is DELAYED 350ms: quick rounds — most
+     * polls land in well under that — never flash it, so it only
+     * announces rounds the user is genuinely waiting on, and
+     * vanishes the instant the data lands. */
+    _setSpinner(on) {
+        this._spinner.set_visible(on);
+        if (on) {
+            if (!this._loadPend && !this._loadPill?.get_visible())
+                this._loadPend = GLib.timeout_add(GLib.PRIORITY_DEFAULT,
+                    350, () => {
+                        this._loadPend = 0;
+                        this._loadPill?.set_visible(true);
+                        this._loadSpin?.start();
+                        return GLib.SOURCE_REMOVE;
+                    });
+        } else {
+            if (this._loadPend) {
+                GLib.source_remove(this._loadPend);
+                this._loadPend = 0;
+            }
+            this._loadPill?.set_visible(false);
+            this._loadSpin?.stop();
+        }
+    }
+
     _setSwipe(row, open) {
         if (this._editMode) {
             // chips are already pinned on every row — a stray swipe
@@ -2853,7 +2893,7 @@ class TickerWindow extends Adw.ApplicationWindow {
                 return;
             log('TickerGlass: fetch stalled >120s — recovering');
             this._busy = false;
-            this._spinner.set_visible(false);
+            this._setSpinner(false);
         }
         const syms = this._activeList()?.symbols ?? [];
         // a previewed hero gets its own quote too, so the panel keeps
@@ -2874,7 +2914,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         }
         this._busy = true;
         this._busySince = GLib.get_monotonic_time() / 1e6;
-        this._spinner.set_visible(true);
+        this._setSpinner(true);
         this._client.quotes([...syms, ...prev],
                            {sparkRange:
                             this._settings.get_string('spark-range'),
@@ -2896,7 +2936,7 @@ class TickerWindow extends Adw.ApplicationWindow {
                 this._atWall = Math.floor(GLib.get_real_time() / 1e6);
                 this._busy = false;
                 this._busySince = 0;
-                this._spinner.set_visible(false);
+                this._setSpinner(false);
                 // final pass wins over any debounced partial rebuild
                 if (this._tablePend) {
                     GLib.source_remove(this._tablePend);
@@ -2923,7 +2963,7 @@ class TickerWindow extends Adw.ApplicationWindow {
                 logError(e, 'TickerGlass app');
                 this._busy = false;
                 this._busySince = 0;
-                this._spinner.set_visible(false);
+                this._setSpinner(false);
                 this._setStatus(`Fetch failed: ${e.message}`);
                 this._drainRefresh();
             });
@@ -2979,7 +3019,7 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._queued = true;
             return;
         }
-        this._spinner.set_visible(true);
+        this._setSpinner(true);
         this._client.quotes(syms,
                             {sparkRange: '1mo',
                              onQuote: q => this._partialQuote(q)})
@@ -2994,7 +3034,7 @@ class TickerWindow extends Adw.ApplicationWindow {
                     else
                         this._quotes.push(q);
                 }
-                this._spinner.set_visible(false);
+                this._setSpinner(false);
                 if (this._tablePend) {
                     GLib.source_remove(this._tablePend);
                     this._tablePend = 0;
@@ -3008,7 +3048,7 @@ class TickerWindow extends Adw.ApplicationWindow {
                 if (this._dead)
                     return;
                 logError(e, 'TickerGlass app');
-                this._spinner.set_visible(false);
+                this._setSpinner(false);
                 this._refresh(true);   // fall back to the full round
             });
     }
