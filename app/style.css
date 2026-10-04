@@ -182,6 +182,12 @@ window { font-family: Inter, Cantarell, sans-serif; }
   min-width: 1px;
   margin: 3px 0;
 }
+/* Manage pill while Remove-tickers mode is ON: an inset ring reads
+ * as pressed over the gradient skin (the mode's checkmark lives in
+ * the menu; this is the at-a-glance cue) */
+.tg-manage-on {
+  box-shadow: inset 0 0 0 2px alpha(#000000, 0.55);
+}
 /* inline search results (header popover rows) */
 .tg-search-pop { padding: 7px 10px; border-radius: 8px; }
 .tg-search-pop:hover, .tg-search-pop:focus {
