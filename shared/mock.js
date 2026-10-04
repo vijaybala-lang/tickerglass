@@ -246,4 +246,15 @@ export class DemoClient {
         }));
         return [...known, ...made];
     }
+
+    /* pseudo market screener: the anchor stock pool ranked by demo move */
+    async screener(scrId, count = 12) {
+        const pool = Object.keys(ANCHORS)
+            .filter(s => !/[\^=]|-USD$/.test(s) && s !== 'BRK-B');
+        const {quotes: qs} = await this.quotes(pool);
+        const dir = scrId === 'day_losers' ? 1 : -1;
+        return qs.filter(q => !q.error && q.changePct != null)
+                 .sort((a, b) => dir * (a.changePct - b.changePct))
+                 .slice(0, count);
+    }
 }

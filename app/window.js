@@ -676,11 +676,43 @@ class TickerWindow extends Adw.ApplicationWindow {
         const movWrap = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL,
                                      margin_start: 12, margin_end: 12,
                                      margin_top: 8, spacing: 2});
+        const movHeadRow = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
+                                        spacing: 8});
         this._movSummary = new Gtk.Label({label: 'Waiting for quotes…',
-                                          xalign: 0,
+                                          xalign: 0, hexpand: true,
+                                          ellipsize: 3,
                                           css_classes: ['dim-label',
                                                         'caption']});
-        movWrap.append(this._movSummary);
+        movHeadRow.append(this._movSummary);
+        // scope chips: rank my watchlist vs the whole US market
+        this._mvScopeChips = {};
+        for (const [val, lbl, tip] of [
+                ['list', 'My list', 'Rank the active watchlist'],
+                ['market', 'Market',
+                 'Biggest movers across US equities']]) {
+            const b = new Gtk.Button({label: lbl, tooltip_text: tip});
+            b.add_css_class('tg-chip');
+            b.connect('clicked', () =>
+                this._settings.set_string('movers-scope', val));
+            movHeadRow.append(b);
+            this._mvScopeChips[val] = b;
+        }
+        // sparkline window for the tiles + the table's spark column
+        this._mvSparkBtn = new Gtk.MenuButton({label: 'Spark 1M',
+            tooltip_text: 'Sparkline window (drives tiles and table)'});
+        this._mvSparkBtn.add_css_class('flat');
+        {
+            const m = new Gio.Menu();
+            const sec = new Gio.Menu();
+            for (const [id, lbl] of [['1d', '1D'], ['5d', '1W'],
+                                     ['1mo', '1M'], ['6mo', '6M']])
+                sec.append(lbl, `win.spark::${id}`);
+            m.append_section(null, sec);
+            this._mvSparkBtn.set_menu_model(m);
+        }
+        movHeadRow.append(this._mvSparkBtn);
+        movWrap.append(movHeadRow);
+        this._updateSparkBtn();
         const movScroll = new Gtk.ScrolledWindow({
             vexpand: true, hscrollbar_policy: Gtk.PolicyType.NEVER,
             margin_top: 4,
@@ -708,11 +740,12 @@ class TickerWindow extends Adw.ApplicationWindow {
             // selection is exactly the CSCO-only halo in the screenshot
             fb.set_selection_mode(Gtk.SelectionMode.NONE);
             fb.connect('child-activated', (box, child) => {
-                const sym = child.get_child()?._sym;
-                if (!sym)
+                const tile = child.get_child();
+                if (!tile?._sym)
                     return;
-                this._selectSymbol(sym);
-                this._stack.set_visible_child_name('chart');
+                // market movers are outsiders: _showSymbol previews
+                // them like a search pick; watchlist tiles pass through
+                this._showSymbol(tile._sym, {name: tile._name ?? ''});
             });
             movCol.append(fb);
             this._movLists[key] = fb;
@@ -1043,6 +1076,20 @@ class TickerWindow extends Adw.ApplicationWindow {
         });
         this.add_action(cmpA);
         this._cmpAction = cmpA;
+
+        // sparkline window: state mirrors the spark-range key; the
+        // watcher re-kicks the quote round, which is what re-shapes
+        // every sparkline
+        const sparkA = new Gio.SimpleAction({name: 'spark',
+            parameter_type: new GLib.VariantType('s'),
+            state: new GLib.Variant('s',
+                this._settings.get_string('spark-range'))});
+        sparkA.connect('change-state', (a, v) => {
+            a.set_state(v);
+            this._settings.set_string('spark-range', v.get_string()[0]);
+        });
+        this.add_action(sparkA);
+        this._sparkAction = sparkA;
 
         // per-column visibility toggles: win.col.<key>, boolean stateful so
         // the menu renders checkmarks
@@ -2101,6 +2148,34 @@ class TickerWindow extends Adw.ApplicationWindow {
     _refreshMovers() {
         if (!this._movLists)
             return;
+        const scope = this._settings.get_string('movers-scope');
+        for (const [v, b] of Object.entries(this._mvScopeChips))
+            b.set_css_classes(['tg-chip'].concat(
+                scope === v ? ['tg-chip-active'] : []));
+        if (scope === 'market') {
+            // fetch once, restale never: keep the last answer on screen
+            // while the next one is in flight; refetch only while the
+            // page is actually open, every 2 min at most
+            const mv = this._mvMarket;
+            const age = mv ? GLib.get_monotonic_time() / 1e6 - mv.stamp : 1e9;
+            if (!mv || (age > 120 && !this._mvBusy &&
+                        this._stack?.get_visible_child_name() === 'movers'))
+                this._loadMarketMovers();
+            this._movHeads.gain.set_text('Market gainers');
+            this._movHeads.lose.set_text('Market losers');
+            this._movSummary.set_text(
+                mv?.gainers?.length
+                    ? `US equities, all exchanges · screened ${mv.at}`
+                    : mv ? 'Screener unreachable — try the Yahoo data source'
+                         : 'Fetching market movers…');
+            this._fillMovers('gain',
+                (mv?.gainers ?? []).filter(q => q.changePct != null),
+                mv ? 'The screener came back quiet' : 'Fetching…');
+            this._fillMovers('lose',
+                (mv?.losers ?? []).filter(q => q.changePct != null),
+                mv ? '' : 'Fetching…');
+            return;
+        }
         const syms = this._activeList()?.symbols ?? [];
         const qs = syms.map(s => this._quoteOf(s))
                        .filter(q => q && !q.error && q.price != null &&
@@ -2124,6 +2199,48 @@ class TickerWindow extends Adw.ApplicationWindow {
             qs.length ? 'Nothing in the green yet today' : '');
         this._fillMovers('lose', down,
             qs.length ? 'No decliners — everything holding up' : '');
+    }
+
+    /* whole-market movers: Yahoo's predefined screeners, one request
+     * per direction, crumb bootstrapped inside the client. The Nasdaq
+     * source routes these to its Yahoo fallback (direct-then-relay) —
+     * the screener is the one dataset Nasdaq's site API won't hand
+     * out keylessly */
+    async _loadMarketMovers() {
+        if (this._mvBusy || this._dead)
+            return;
+        this._mvBusy = true;
+        try {
+            const [g, l] = await Promise.all([
+                this._client.screener('day_gainers', 12),
+                this._client.screener('day_losers', 12),
+            ]);
+            if (this._dead)
+                return;
+            const now = GLib.DateTime.new_now_local();
+            log(`TickerGlass: market movers ${g.length} up / ${l.length} down`);
+            this._mvMarket = {
+                gainers: g, losers: l,
+                at: now ? now.format('%H:%M') : '',
+                stamp: GLib.get_monotonic_time() / 1e6,
+            };
+        } catch (e) {
+            log(`TickerGlass: market movers failed: ${e.message}`);
+            // record the attempt: an empty answer is still an answer —
+            // without it every table flush would re-hit a dead screener
+            this._mvMarket ??= {gainers: [], losers: [], at: '', stamp: 0};
+        } finally {
+            this._mvBusy = false;
+        }
+        this._refreshMovers();
+    }
+
+    _updateSparkBtn() {
+        if (!this._mvSparkBtn)
+            return;
+        const L = {'1d': '1D', '5d': '1W', '1mo': '1M', '6mo': '6M'};
+        const r = this._settings.get_string('spark-range');
+        this._mvSparkBtn.set_label(`Spark ${L[r] ?? r}`);
     }
 
     _fillMovers(key, quotes, emptyText) {
@@ -2157,6 +2274,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         const t = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL,
                                spacing: 6, css_classes: ['tg-tile']});
         t._sym = q.symbol;
+        t._name = q.name ?? q.symbol;
         const head = new Gtk.Box({spacing: 8});
         const symL = new Gtk.Label({label: q.symbol});
         symL.add_css_class('tg-row-sym');
@@ -2278,7 +2396,8 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._busySince = GLib.get_monotonic_time() / 1e6;
         this._spinner.set_visible(true);
         this._client.quotes([...syms, ...prev],
-                           {sparkRange: '1mo',
+                           {sparkRange:
+                            this._settings.get_string('spark-range'),
                             onQuote: q => this._partialQuote(q)})
             .then(res => {
                 if (this._dead)
@@ -2524,11 +2643,26 @@ class TickerWindow extends Adw.ApplicationWindow {
         }
     }
 
+    /* the style button mirrors what the canvas actually draws: an
+     * active comparison forces area→line at paint time, and the label
+     * says so rather than advertising a fill the user can't see */
+    _syncStyleBtn() {
+        const style = this._settings.get_string('chart-style');
+        const cmpSym = this._settings.get_string('compare-symbol');
+        const cmpOn = !!this._cmpHist &&
+            this._cmpHist.range === this._hist?.range &&
+            cmpSym && cmpSym !== this._hero();
+        const eff = (cmpOn && style === 'area') ? 'line' : style;
+        const L = {area: 'Area', line: 'Line', candles: 'Candles'};
+        this._styleBtn.set_label(L[eff] ?? 'Area');
+    }
+
     _updateCmpChip() {
         const sym = this._settings.get_string('compare-symbol');
         if (!sym || sym === this._hero()) {
             this._cmpBtn.set_label('vs Off');
             this._cmpBtn.set_tooltip_text('Compare against');
+            this._syncStyleBtn();
             return;
         }
         // window move of the benchmark, straight from its own series
@@ -2541,6 +2675,7 @@ class TickerWindow extends Adw.ApplicationWindow {
                         : `vs ${sym} ${fmtPct(pct / 100)}`);
         this._cmpBtn.set_tooltip_text(
             `Overlay ${sym}, normalized to ${this._hero()}'s first point`);
+        this._syncStyleBtn();
     }
 
     /* ── news ─────────────────────────────────────────────────────────── */
@@ -2701,6 +2836,11 @@ class TickerWindow extends Adw.ApplicationWindow {
             ? fmtTime(t, hist.meta.tz)
             : axisDate(t, (hist.points[hist.points.length - 1].t -
                            hist.points[0].t) / 86400);
+        // two stacked area gradients read as mud: while a benchmark is
+        // overlaid, the primary renders as a line regardless of the
+        // saved style (the preference itself is untouched)
+        const style = this._settings.get_string('chart-style');
+        const mode = (cmp && style === 'area') ? 'line' : style;
         // hover bubble: both tickers' REAL price and window move at the
         // hovered instant (the overlay is normalized, the numbers are
         // not). Hero % follows the hero pill's baseline (prev-close on
@@ -2731,7 +2871,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         paintChart(cr, {
             w, h,
             points: hist.points,
-            mode: this._settings.get_string('chart-style'),
+            mode,
             prevClose: hist.range === '1d' ? hist.meta.prevClose : null,
             dark: this._styleManager?.get_dark() ?? true,
             fmtY: v => fmtPrice(v, hist.meta.currency),
@@ -2803,10 +2943,7 @@ class TickerWindow extends Adw.ApplicationWindow {
             b.set_css_classes(r === this._settings.get_string('chart-range')
                 ? ['tg-chip', 'tg-chip-active'] : ['tg-chip']);
         }
-        const ids = ['area', 'line', 'candles'];
-        const styleLbl = {area: 'Area', line: 'Line', candles: 'Candles'};
-        this._styleBtn.set_label(
-            styleLbl[this._settings.get_string('chart-style')] ?? 'Area');
+        this._syncStyleBtn();
         this._ivBtn.set_label(
             INTERVAL_LABEL[hist?.interval] ?? 'Auto');
 
@@ -3071,6 +3208,16 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._loadCompare();
             break;
         }
+        case 'spark-range':
+            this._sparkAction?.set_state(new GLib.Variant('s',
+                this._settings.get_string('spark-range')));
+            this._updateSparkBtn();
+            // sparklines ride the quote round — refetch it
+            this._refresh(true);
+            break;
+        case 'movers-scope':
+            this._refreshMovers();
+            break;
         case 'chart-style':
             this._updateHero();
             this._chart.queue_draw();

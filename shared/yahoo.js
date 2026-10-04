@@ -112,13 +112,16 @@ export class YahooClient {
             (this._penalty.get(a) ?? 0) <= (this._penalty.get(b) ?? 0) ? a : b);
     }
 
-    _get(url, {json = true, deadline = 40} = {}) {
+    _get(url, {json = true, deadline = 40, ua: uaWant = null} = {}) {
         return new Promise((resolve, reject) => {
             // relays 403 browser-spoofing UAs from non-browsers — announce
-            // ourselves honestly there; keep the Firefox one for Yahoo direct
-            const ua = this._relay
+            // ourselves honestly there; keep the Firefox one for Yahoo direct.
+            // The screener opts into the honest UA too: Yahoo's edge 429s
+            // cookie-less browser impersonation on that endpoint, while an
+            // honest client gets a plain 200 (verified against live Yahoo)
+            const ua = uaWant ?? (this._relay
                 ? 'TickerGlass/1.0 (GNOME; tickerglass@vijaybala.dev)'
-                : UA;
+                : UA);
             const session = sessionFor(ua, 30);
             const msg = Soup.Message.new('GET',
                 this._relay ? this._relay + url : url);
@@ -217,7 +220,12 @@ export class YahooClient {
      * the session jar; getcrumb then echoes the crumb for that cookie.
      * Race-bounded: neither await may strand a 429-retry path forever. */
     _bootstrapCrumb() {
-        return new Promise(res => {
+        // re-entrancy matters: the 15s watchdog aborts this._bootSess,
+        // so two overlapping bootstraps would let one's watchdog kill
+        // the other's live handshake — share the in-flight one instead
+        if (this._crumbPend)
+            return this._crumbPend;
+        const p = new Promise(res => {
             let settled = false;
             const done = v => {
                 if (settled)
@@ -232,6 +240,10 @@ export class YahooClient {
             });
             this._innerCrumb().then(done).catch(() => done(''));
         });
+        this._crumbPend = p;
+        p.then(() => { this._crumbPend = null; },
+               () => { this._crumbPend = null; });
+        return p;
     }
 
     async _innerCrumb() {
@@ -437,6 +449,53 @@ export class YahooClient {
                     at: t > 1e12 ? t / 1000 : t,
                 };
             });
+    }
+
+    /* ── market movers ─────────────────────────────────────────────────── */
+
+    /** Yahoo's predefined screeners: 'day_gainers' | 'day_losers' |
+     *  'most_actives'. The endpoint gates behind the same cookie+crumb
+     *  handshake the spark path bootstraps on demand — here 401 is the
+     *  expected first answer, so bootstrap up front instead of paying
+     *  a guaranteed failure per call. */
+    async screener(scrId, count = 12) {
+        if (!this._crumb && !this._relay) {
+            // one handshake shared by concurrent callers
+            this._crumbBoot ??= this._bootstrapCrumb();
+            await this._crumbBoot;
+            this._crumbBoot = null;
+        }
+        const url = `https://{{host}}/v1/finance/screener/predefined/saved` +
+            `?scrIds=${scrId}&count=${count}&formatted=false` +
+            (this._crumb && !this._relay
+                ? `&crumb=${encodeURIComponent(this._crumb)}` : '');
+        // garnish budget: movers must never make the app wait 40s;
+        // honest UA (see _get) — the spoofed browser one earns a 429
+        const HONEST = 'TickerGlass/1.0 (GNOME; tickerglass@vijaybala.dev)';
+        const data = await this._try(`screener ${scrId}`, url,
+            {deadline: 12, ua: HONEST});
+        // payload shape: {finance: {result: [{quotes: [...]}]}}
+        const quotes = data?.finance?.result?.[0]?.quotes ?? [];
+        return quotes
+            // formatted=false payloads speak regularMarketPrice/pct; the
+            // formatted variants send lastPrice/pctChange — take whichever
+            .filter(q => q?.symbol && Number.isFinite(
+                q.lastPrice ?? q.regularMarketPrice))
+            .map(q => ({
+                symbol: q.symbol,
+                name: q.shortname ?? q.shortName ?? q.longName
+                    ?? q.longname ?? q.symbol,
+                price: q.lastPrice ?? q.regularMarketPrice,
+                changePct: Number.isFinite(q.pctChange)
+                    ? q.pctChange / 100
+                    : Number.isFinite(q.regularMarketChangePercent)
+                        ? q.regularMarketChangePercent / 100 : null,
+                spark: null, error: false,
+                currency: q.currency ?? 'USD',
+                exchange: q.exchDisp ?? q.fullExchangeName
+                    ?? q.exchange ?? '',
+                state: q.marketState ?? 'REGULAR',
+            }));
     }
 }
 
@@ -955,6 +1014,23 @@ export class NasdaqClient {
     async news(symbol) {
         return this._back.news(symbol);
     }
+
+    /* screeners are Yahoo-side: Nasdaq's own screener endpoints are
+     * Akamai-gated. Direct Yahoo first (its cookie+crumb flow survives
+     * the 429 gate — a crumb can only match the session that holds the
+     * cookies, so the relayed client usually can't answer this one),
+     * relay second as the clean-IP shot, empty last */
+    async screener(scrId, count = 12) {
+        this._scr ??= [new YahooClient(), this._back];
+        for (const c of this._scr) {
+            try {
+                const r = await c.screener(scrId, count);
+                if (r?.length)
+                    return r;
+            } catch { /* next */ }
+        }
+        return [];
+    }
 }
 
 /* ── facade ─────────────────────────────────────────────────────────────── */
@@ -1010,6 +1086,14 @@ export class MarketClient {
             return await this._impl.news(symbol);
         } catch {
             return [];   // news is garnish — never break the quote flow
+        }
+    }
+
+    async screener(scrId, count = 12) {
+        try {
+            return await this._impl.screener(scrId, count);
+        } catch {
+            return [];   // market movers are garnish too
         }
     }
 }
