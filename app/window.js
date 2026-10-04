@@ -700,11 +700,13 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._movHeads[key] = head;
             // responsive tile grid: wraps by width, no scrolling tricks
             const fb = new Gtk.FlowBox({
-                selection_mode: Gtk.SelectionMode.NONE,
                 homogeneous: true, column_spacing: 10, row_spacing: 10,
                 margin_start: 10, margin_end: 10, margin_top: 4,
                 css_classes: ['tg-tilegrid'],
             });
+            // explicit call, not just the construct property: a stray
+            // selection is exactly the CSCO-only halo in the screenshot
+            fb.set_selection_mode(Gtk.SelectionMode.NONE);
             fb.connect('child-activated', (box, child) => {
                 const sym = child.get_child()?._sym;
                 if (!sym)
@@ -2134,11 +2136,15 @@ class TickerWindow extends Adw.ApplicationWindow {
         for (const q of quotes.slice(0, 12)) {
             fb.insert(this._moversTile(q), -1);
             // the card is decoration, not a focus stop — the tile's
-            // click handler is the interaction, and a focused
-            // FlowBoxChild draws a ring no CSS override can hide
-            const fc = fb.get_last_child();
-            if (fc?.set_can_focus)
+            // click handler is the interaction, and a focused/selected
+            // FlowBoxChild paints a halo no ancestor rule reaches
+            let fc = fb.get_last_child();
+            if (fc && !(fc instanceof Gtk.FlowBoxChild) && fc.get_last_child)
+                fc = fc.get_last_child();   // internal box, if this GTK nests
+            if (fc) {
                 fc.set_can_focus(false);
+                fc.add_css_class('tg-flowcell');
+            }
         }
         const ph = this._movEmpties[key];
         ph.set_text(emptyText);

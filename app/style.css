@@ -266,6 +266,28 @@ list row { border-radius: 12px; }
 .tg-tilegrid flowchild:selected .tg-tile {
   background: alpha(currentcolor, 0.08);
 }
+/* class placed ON each FlowBoxChild from code — the sure hit when
+ * ancestor selectors against the theme kept missing the node that
+ * paints the selected/hover halo */
+.tg-flowcell,
+.tg-flowcell:hover,
+.tg-flowcell:active,
+.tg-flowcell:selected,
+.tg-flowcell:focus,
+.tg-flowcell:focus-within {
+  background: none;
+  background-image: none;
+  border: none;
+  box-shadow: none;
+  outline-width: 0;
+  outline-style: none;
+  padding: 0;
+  margin: 0;
+}
+.tg-flowcell:hover .tg-tile,
+.tg-flowcell:selected .tg-tile {
+  background: alpha(currentcolor, 0.08);
+}
 
 /* dialogs */
 .dlg-pad { padding: 18px; }
