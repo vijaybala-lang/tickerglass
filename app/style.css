@@ -225,20 +225,23 @@ window { font-family: Inter, Cantarell, sans-serif; }
   min-height: 2px;
 }
 
-/* swipe-to-delete / edit-mode pill: a floating trash-can capsule at
- * the row's right edge — vertical margins + full radius so it reads
- * as an overlay, not a slice of the row */
+/* swipe-to-delete / edit-mode pill: GLASS capsule floating over the
+ * row (Gtk.Overlay child — zero layout space, the sparkline never
+ * shrinks). Translucent red + backdrop blur via GTK 4.20+
+ * background-effect; the trash ink follows @window_fg_color so it
+ * reads on the red wash in both light (pale glass → dark ink) and
+ * night (dark glass → white ink) without a line of JS. */
 .tg-del-reveal {
-  background: #f5455c;
-  color: #ffffff;
+  background: alpha(#f5455c, 0.55);
+  backdrop-filter: blur(20px);   /* GTK 4.20+ true backdrop glass */
+  color: @window_fg_color;
   border: none;
   border-radius: 999px;
   padding: 0;
   min-width: 0;
   min-height: 26px;
-  margin: 4px 4px 4px 0;
 }
-.tg-del-reveal:hover { background: alpha(#f5455c, 0.85); }
+.tg-del-reveal:hover { background: alpha(#f5455c, 0.75); }
 
 /* chart card */
 .tg-chart-area { border-radius: 16px; }
