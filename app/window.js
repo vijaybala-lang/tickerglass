@@ -1386,8 +1386,7 @@ class TickerWindow extends Adw.ApplicationWindow {
             const row = new Gtk.ListBoxRow();
             row._sym = sym;
             const box = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
-                                     spacing: 8, margin_start: 10,
-                                     margin_end: 10, margin_top: 5,
+                                     spacing: 8, margin_top: 5,
                                      margin_bottom: 2});
             // NO ellipsize here, deliberately: GTK auto-marks ellipsized
             // labels selectable when truncation happens during layout —
@@ -1412,7 +1411,6 @@ class TickerWindow extends Adw.ApplicationWindow {
                                          css_classes: ['dim-label'],
                                          can_target: false,
                                          halign: Gtk.Align.START,
-                                         margin_start: 10,
                                          margin_bottom: 5});
             nameL.add_css_class('tg-row-name');
             row._nameL = nameL;
@@ -1442,7 +1440,6 @@ class TickerWindow extends Adw.ApplicationWindow {
                                       spacing: 0});
             praw.append(priceL);
             praw.append(pctBox);
-            box.append(praw);
             // swipe-to-delete: the red ✕ rides the row's flow layout at
             // zero width until a horizontal GestureDrag pushes it in.
             // Vertical hold-drag is the DragSource's (long-press-to-move):
@@ -1456,7 +1453,6 @@ class TickerWindow extends Adw.ApplicationWindow {
                 this._setSwipe(row, false);
                 this._removeSymbol(sym);
             });
-            box.append(delBtn);
             row._delBtn = delBtn;
             // ONE gesture per row serves both interactions, decided by
             // the axis of the initial motion: horizontal reveals delete,
@@ -1482,11 +1478,22 @@ class TickerWindow extends Adw.ApplicationWindow {
             } catch (e) { /* ditto */ }
         });
         row.add_controller(hov);
-            // two-line row: [sym | spark | price] on top, name under
+            // three columns: [sym | spark] with the name as its second
+            // line on the left, and price+pct as an independent right
+            // column CENTERED against the full two-line height — so
+            // the name hugs the sparkline instead of sitting under it
+            const leftV = new Gtk.Box({
+                orientation: Gtk.Orientation.VERTICAL, spacing: 0,
+                hexpand: true});
+            leftV.append(box);
+            leftV.append(nameL);
+            praw.set_valign(Gtk.Align.CENTER);
             const rowWrap = new Gtk.Box({
-                orientation: Gtk.Orientation.VERTICAL, spacing: 0});
-            rowWrap.append(box);
-            rowWrap.append(nameL);
+                orientation: Gtk.Orientation.HORIZONTAL, spacing: 8,
+                margin_start: 10, margin_end: 10});
+            rowWrap.append(leftV);
+            rowWrap.append(praw);
+            rowWrap.append(delBtn);
             row.set_child(rowWrap);
             row._priceL = priceL;
             row._pctL = pctL;
