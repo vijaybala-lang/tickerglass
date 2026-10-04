@@ -678,6 +678,11 @@ class TickerWindow extends Adw.ApplicationWindow {
                                      margin_top: 8, spacing: 2});
         const movHeadRow = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
                                         spacing: 8});
+        // page title names the window the ranking actually used
+        this._movTitle = new Gtk.Label({label: '', xalign: 0,
+                                        css_classes: ['title-3'],
+                                        margin_bottom: 2});
+        movWrap.append(this._movTitle);
         this._movSummary = new Gtk.Label({label: 'Waiting for quotes…',
                                           xalign: 0, hexpand: true,
                                           ellipsize: 3,
@@ -699,8 +704,8 @@ class TickerWindow extends Adw.ApplicationWindow {
         }
         // sparkline window for the tiles + the table's spark column
         this._mvSparkBtn = new Gtk.MenuButton({label: 'Spark 1M',
-            tooltip_text: 'Sparkline window — chart shape only; movers are '
-                        + 'always ranked by today\u2019s move'});
+            tooltip_text: 'Window for the movers ranking and mini-charts '
+                        + '(Market scope is always today)'});
         this._mvSparkBtn.add_css_class('flat');
         {
             const m = new Gio.Menu();
@@ -2153,6 +2158,9 @@ class TickerWindow extends Adw.ApplicationWindow {
         for (const [v, b] of Object.entries(this._mvScopeChips))
             b.set_css_classes(['tg-chip'].concat(
                 scope === v ? ['tg-chip-active'] : []));
+        // market movers have one fixed window (the trading day) and no
+        // sparklines at all — the window picker would be a lie there
+        this._mvSparkBtn.set_visible(scope !== 'market');
         if (scope === 'market') {
             // fetch once, restale never: keep the last answer on screen
             // while the next one is in flight; refetch only while the
@@ -2162,8 +2170,9 @@ class TickerWindow extends Adw.ApplicationWindow {
             if (!mv || (age > 120 && !this._mvBusy &&
                         this._stack?.get_visible_child_name() === 'movers'))
                 this._loadMarketMovers();
-            this._movHeads.gain.set_text("Today's gainers");
-            this._movHeads.lose.set_text("Today's losers");
+            this._movTitle.set_text("Today's Top Movers");
+            this._movHeads.gain.set_text('Gainers');
+            this._movHeads.lose.set_text('Losers');
             this._movSummary.set_text(
                 mv?.gainers?.length
                     ? `US equities, all exchanges · ranked by today's ` +
@@ -2171,36 +2180,57 @@ class TickerWindow extends Adw.ApplicationWindow {
                     : mv ? 'Screener unreachable — try the Yahoo data source'
                          : 'Fetching market movers…');
             this._fillMovers('gain',
-                (mv?.gainers ?? []).filter(q => q.changePct != null),
+                (mv?.gainers ?? []).filter(q => q.changePct != null)
+                    .map(q => ({q, pct: q.changePct})),
                 mv ? 'The screener came back quiet' : 'Fetching…');
             this._fillMovers('lose',
-                (mv?.losers ?? []).filter(q => q.changePct != null),
+                (mv?.losers ?? []).filter(q => q.changePct != null)
+                    .map(q => ({q, pct: q.changePct})),
                 mv ? '' : 'Fetching…');
             return;
         }
+        // My list: rank over the selected spark window. The quote round
+        // fetches each spark AT that window, so the window's % is just
+        // the spark's own endpoints — same-day move when the window is
+        // 1D (the canonical changePct), no extra network otherwise.
+        const win = this._settings.get_string('spark-range');
+        const TITLE = {'1d': "Today's Top Movers",
+                       '5d': '1 Week Top Movers',
+                       '1mo': '1 Month Top Movers',
+                       '6mo': '6 Month Top Movers'};
+        this._movTitle.set_text(TITLE[win] ?? "Today's Top Movers");
+        const wpct = q => {
+            if (win === '1d')
+                return q.changePct;
+            const sp = q.spark;
+            return sp?.length > 1 && sp[0]
+                ? sp.at(-1) / sp[0] - 1 : q.changePct;
+        };
         const syms = this._activeList()?.symbols ?? [];
-        const qs = syms.map(s => this._quoteOf(s))
-                       .filter(q => q && !q.error && q.price != null &&
-                                    q.changePct != null);
-        const up = qs.filter(q => q.changePct > 0)
-                     .sort((a, b) => b.changePct - a.changePct);
-        const down = qs.filter(q => q.changePct < 0)
-                       .sort((a, b) => a.changePct - b.changePct);
-        const state = (this._quoteOf(this._hero()) ?? qs[0])?.state;
-        const ses = state === 'POST' ? 'After-hours'
-                  : state === 'PRE' ? 'Pre-market' : '';
-        const top = ses || 'Top';
-        this._movHeads.gain.set_text(`${top} gainers`);
-        this._movHeads.lose.set_text(`${top} losers`);
-        const flat = qs.length - up.length - down.length;
-        this._movSummary.set_text(qs.length
-            ? `${qs.length} tracked · ${up.length} gaining · ` +
+        const rows = syms.map(s => this._quoteOf(s))
+                         .filter(q => q && !q.error && q.price != null)
+                         .map(q => ({q, pct: wpct(q)}))
+                         .filter(r => r.pct != null);
+        const up = rows.filter(r => r.pct > 0)
+                       .sort((a, b) => b.pct - a.pct);
+        const down = rows.filter(r => r.pct < 0)
+                         .sort((a, b) => a.pct - b.pct);
+        const state = (this._quoteOf(this._hero()) ?? rows[0]?.q)?.state;
+        const ses = win === '1d'
+            ? (state === 'POST' ? 'After-hours '
+               : state === 'PRE' ? 'Pre-market ' : '')
+            : '';
+        this._movHeads.gain.set_text(`${ses}Gainers`);
+        this._movHeads.lose.set_text(`${ses}Losers`);
+        const flat = rows.length - up.length - down.length;
+        this._movSummary.set_text(rows.length
+            ? `${rows.length} tracked · ${up.length} gaining · ` +
               `${down.length} losing` + (flat ? ` · ${flat} flat` : '')
             : 'Waiting for quotes…');
         this._fillMovers('gain', up,
-            qs.length ? 'Nothing in the green yet today' : '');
+            rows.length ? 'Nothing in the green for this window' : '');
         this._fillMovers('lose', down,
-            qs.length ? 'No decliners — everything holding up' : '');
+            rows.length ? 'No decliners for this window' : '');
     }
 
     /* whole-market movers: Yahoo's predefined screeners, one request
@@ -2245,15 +2275,15 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._mvSparkBtn.set_label(`Spark ${L[r] ?? r}`);
     }
 
-    _fillMovers(key, quotes, emptyText) {
+    _fillMovers(key, rows, emptyText) {
         const fb = this._movLists[key];
         let c = fb.get_last_child();
         while (c !== null) {
             fb.remove(c);
             c = fb.get_last_child();
         }
-        for (const q of quotes.slice(0, 12)) {
-            fb.insert(this._moversTile(q), -1);
+        for (const {q, pct} of rows.slice(0, 12)) {
+            fb.insert(this._moversTile(q, pct), -1);
             // the card is decoration, not a focus stop — the tile's
             // click handler is the interaction, and a focused/selected
             // FlowBoxChild paints a halo no ancestor rule reaches
@@ -2267,12 +2297,14 @@ class TickerWindow extends Adw.ApplicationWindow {
         }
         const ph = this._movEmpties[key];
         ph.set_text(emptyText);
-        ph.set_visible(!quotes.length && !!emptyText);
+        ph.set_visible(!rows.length && !!emptyText);
     }
 
     /* one dashboard tile: symbol + pct up top, name, price, and the
-     * day's shape across the full tile width */
-    _moversTile(q) {
+     * window's shape across the full tile width. `pct` is the same
+     * number the ranking used — tile and sort order never disagree */
+    _moversTile(q, pct) {
+        const shown = pct ?? q.changePct ?? 0;
         const t = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL,
                                spacing: 6, css_classes: ['tg-tile']});
         t._sym = q.symbol;
@@ -2286,11 +2318,11 @@ class TickerWindow extends Adw.ApplicationWindow {
         head.append(spacer);
         const pill = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
                                   spacing: 4});
-        pill.add_css_class(q.changePct >= 0 ? 'tg-up' : 'tg-down');
+        pill.add_css_class(shown >= 0 ? 'tg-up' : 'tg-down');
         const tri = this._makeTri(10);
-        tri._up = q.changePct >= 0;
+        tri._up = shown >= 0;
         pill.append(tri);
-        const pctL = new Gtk.Label({label: fmtPct(q.changePct),
+        const pctL = new Gtk.Label({label: fmtPct(Math.abs(shown)),
                                     css_classes: ['numeric']});
         pctL.add_css_class('heading');
         pill.append(pctL);
@@ -2309,10 +2341,9 @@ class TickerWindow extends Adw.ApplicationWindow {
                                             content_height: 34,
                                             hexpand: true,
                                             valign: Gtk.Align.END});
-            const up = (q.change ?? 0) >= 0;
             const vals = q.spark;
             sp.set_draw_func((a, cr, w, h) =>
-                paintMiniSpark(cr, {w, h, values: vals, up}));
+                paintMiniSpark(cr, {w, h, values: vals, up: shown >= 0}));
             t.append(sp);
         }
         t.set_size_request(178, -1);
