@@ -1507,15 +1507,8 @@ class TickerWindow extends Adw.ApplicationWindow {
                 margin_start: 10, margin_end: 10});
             rowWrap.append(leftV);
             rowWrap.append(praw);
-            // the trash pill FLOATS: an Overlay child takes zero
-            // layout space, so revealing it never squeezes the
-            // sparkline or shifts a single pixel of the row
-            const rowOv = new Gtk.Overlay();
-            rowOv.set_child(rowWrap);
-            delBtn.set_halign(Gtk.Align.END);
-            delBtn.set_margin_end(8);
-            rowOv.add_overlay(delBtn);
-            row.set_child(rowOv);
+            rowWrap.append(delBtn);
+            row.set_child(rowWrap);
             row._priceL = priceL;
             row._pctL = pctL;
             row._pctBox = pctBox;
