@@ -8,6 +8,7 @@
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
+import GdkPixbuf from 'gi://GdkPixbuf';
 import Gtk from 'gi://Gtk?version=4.0';
 import Gdk from 'gi://Gdk?version=4.0';
 import Adw from 'gi://Adw';
@@ -22,6 +23,104 @@ const TG_DEL_W = 44;
 import {parseWatchlists, stringifyWatchlists, fmtPrice, fmtDelta, fmtPct,
         fmtCompact, fmtTime, axisDate, symbolShort, RANGES, RANGE_LABEL,
         INTERVALS, INTERVAL_LABEL, intervalFor} from './fmt.js';
+
+/* ── news source icons: fetch /favicon.ico once per host (Soup lives in
+ *    yahoo.js's world, so a dynamic import keeps it off the UI's cold
+ *    path). A cairo letter-avatar paints instantly and survives fetch
+ *    failure; every row of the host redraws when the real icon lands ─── */
+const FAV = new Map();        // host -> GdkPixbuf.Pixbuf | null
+const FAV_WAIT = new Map();   // host -> [waiting DrawingAreas]
+
+function hostOf(url) {
+    try {
+        return GLib.Uri.parse(url ?? '', GLib.UriFlags.NONE)?.get_host()
+            ?? '';
+    } catch {
+        return '';
+    }
+}
+
+function favFetch(host) {
+    if (!host || FAV.has(host) || FAV_WAIT.has(host))
+        return;
+    FAV_WAIT.set(host, []);
+    (async () => {
+        try {
+            const { default: Soup } = await import('gi://Soup?version=3.0');
+            const sess = new Soup.Session({ timeout: 8 });
+            const msg = Soup.Message.new('GET', `https://${host}/favicon.ico`);
+            const bytes = await new Promise((res, rej) =>
+                sess.send_and_read_async(
+                    msg, GLib.PRIORITY_LOW, null, (s, r) => {
+                        try {
+                            res(s.send_and_read_finish(r));
+                        } catch (e) {
+                            rej(e);
+                        }
+                    }));
+            const st = new Gio.MemoryInputStream.new_from_bytes(bytes);
+            const pb = await new Promise((res, rej) =>
+                GdkPixbuf.Pixbuf.new_from_stream_at_scale_async(
+                    st, 36, 36, true, null, (s, r) => {
+                        try {
+                            res(GdkPixbuf.Pixbuf.new_from_stream_finish(r));
+                        } catch (e) {
+                            rej(e);
+                        }
+                    }));
+            FAV.set(host, pb);
+        } catch {
+            FAV.set(host, null);   // letter avatar stays for good
+        }
+        for (const w of FAV_WAIT.get(host) ?? [])
+            w.queue_draw();
+        FAV_WAIT.delete(host);
+    })();
+}
+
+function favAttach(w) {
+    if (!w._host)
+        return;
+    if (!FAV.has(w._host) && !FAV_WAIT.has(w._host))
+        favFetch(w._host);          // registers the waiter list synchronously
+    FAV_WAIT.get(w._host)?.push(w);
+}
+
+function hsl2rgb(h, s, l) {
+    const f = n => {
+        const k = (n + h * 12) % 12;
+        return l - s * Math.min(l, 1 - l) *
+            Math.max(-1, Math.min(k - 3, 9 - k, 1));
+    };
+    return [f(0), f(8), f(4)];
+}
+
+function paintFav(w, cr, ww, hh) {
+    const pb = w._host ? FAV.get(w._host) : null;
+    if (pb) {
+        Gdk.cairo_set_source_pixbuf(
+            cr, pb, (ww - pb.width) / 2, (hh - pb.height) / 2);
+        cr.paint();
+        return;
+    }
+    // letter avatar: hue stable per host (same site = same color)
+    let h = 0;
+    for (const c of (w._host || w._letter || '?'))
+        h = (h * 31 + c.charCodeAt(0)) % 360;
+    const [R, G, B] = hsl2rgb(h / 360, 0.5, 0.45);
+    cr.arc(ww / 2, hh / 2, Math.min(ww, hh) / 2 - 1, 0, 2 * Math.PI);
+    cr.setSourceRGB(R, G, B);
+    cr.fill();
+    cr.selectFontFace('Sans', Cairo.FontWeight.BOLD, Cairo.FontSlant.NORMAL);
+    cr.setFontSize(hh * 0.55);
+    // gi://cairo exposes neither the textExtents callback form nor a
+    // TextExtents boxed constructor — approximate metrics from the font
+    // size (advance ≈ 0.65em, cap ≈ 0.7em); centering one letter is
+    // forgiving and the whole avatar is 20px anyway
+    cr.moveTo(ww / 2 - hh * 0.18, hh / 2 + hh * 0.19);
+    cr.setSourceRGB(1, 1, 1);
+    cr.showText(w._letter);
+}
 
 /* ── table row model: one plain JS object per quote, camelCase fields —
  *    display strings for the cells + raw numbers for JS-side sorting ──── */
@@ -456,6 +555,25 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._ivBtn.add_css_class('flat');
         controls.append(this._ivBtn);
 
+        // benchmark overlay picker: Off / SPY / QQQ / DIA / IWM / custom
+        this._cmpBtn = new Gtk.MenuButton({label: 'vs Off',
+                                           tooltip_text: 'Compare against'});
+        this._cmpBtn.add_css_class('flat');
+        {
+            const m = new Gio.Menu();
+            const sec = new Gio.Menu();
+            sec.append('No comparison', 'win.cmp::off');
+            sec.append('Custom symbol…', 'win.cmp::__custom');
+            m.append_section(null, sec);
+            const bench = new Gio.Menu();
+            for (const s of ['SPY', 'QQQ', 'DIA', 'IWM', 'VIX'])
+                bench.append(s === 'VIX' ? 'VIX (^VIX)' : s,
+                             `win.cmp::${s === 'VIX' ? '^VIX' : s}`);
+            m.append_section(null, bench);
+            this._cmpBtn.set_menu_model(m);
+        }
+        controls.append(this._cmpBtn);
+
         this._styleBtn = new Gtk.MenuButton({label: 'Area',
                                              tooltip_text: 'Chart style'});
         this._styleBtn.add_css_class('flat');
@@ -487,9 +605,8 @@ class TickerWindow extends Adw.ApplicationWindow {
         newsScroll.add_css_class('card');
         this._newsList = new Gtk.ListBox({css_classes: ['tg-news-list']});
         this._newsList.add_css_class('flat');
-        this._newsList.set_header_func((row, before) => {
-            row.set_header(before ? new Gtk.Separator({orientation: Gtk.Orientation.HORIZONTAL}) : null);
-        });
+        // no separators: the rows are pills now, the gaps between them
+        // are the divider
         this._newsList.connect('row-activated', (l, row) => {
             if (row?._url)
                 this._openReader(row._url, row._title);
@@ -810,6 +927,37 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._settings.set_string('chart-style', v.get_string()[0]);
         });
         this.add_action(style);
+
+        // chart comparison: state mirrors compare-symbol ('off' when
+        // unset); '__custom' is a command item — opens the prompt and
+        // deliberately does NOT take state
+        const cmpA = new Gio.SimpleAction({
+            name: 'cmp', parameter_type: new GLib.VariantType('s'),
+            state: new GLib.Variant('s',
+                this._settings.get_string('compare-symbol') || 'off'),
+        });
+        cmpA.connect('change-state', (a, v) => {
+            // GJS: get_string() returns [str, len] — take [0]
+            const s = v.get_string()[0];
+            if (s === '__custom') {
+                textPrompt({
+                    parent: this, title: 'Compare against',
+                    initial: '', acceptLabel: 'Compare',
+                    onAccept: t => {
+                        const sym = t.trim().toUpperCase();
+                        if (sym)
+                            this._settings.set_string('compare-symbol',
+                                                      sym);
+                    },
+                });
+                return;
+            }
+            a.set_state(v);
+            this._settings.set_string('compare-symbol',
+                s === 'off' ? '' : s);
+        });
+        this.add_action(cmpA);
+        this._cmpAction = cmpA;
 
         // per-column visibility toggles: win.col.<key>, boolean stateful so
         // the menu renders checkmarks
@@ -2112,6 +2260,7 @@ class TickerWindow extends Adw.ApplicationWindow {
                       + `${range} (${hist.points.length} pts)`);
             this._ivBtn.set_label(INTERVAL_LABEL[hist.interval] ?? hist.interval);
             this._updateHero();
+            this._loadCompare();
         } catch (e) {
             logError(e, 'TickerGlass app');
             if (this._histKey === key)
@@ -2131,6 +2280,64 @@ class TickerWindow extends Adw.ApplicationWindow {
                 this._chart.queue_draw();
             }
         }
+    }
+
+    /* benchmark overlay: fetch the compare symbol's history over the
+     * same range/interval; _drawChart normalizes it into the primary's
+     * price space (both share the first point = 0% move) */
+    async _loadCompare() {
+        const sym = this._settings.get_string('compare-symbol');
+        const hero = this._hero();
+        if (!sym || sym === hero) {
+            this._cmpHist = null;
+            this._cmpKey = null;
+            this._chart.queue_draw();
+            this._updateCmpChip();
+            return;
+        }
+        const range = this._settings.get_string('chart-range');
+        const iv = this._settings.get_string('chart-interval');
+        const key = `${sym}|${range}|${iv}`;
+        if (this._cmpKey === key)
+            return;
+        this._cmpKey = key;
+        try {
+            const hist = await this._client.history(sym, range, iv);
+            if (this._dead || this._cmpKey !== key ||
+                this._settings.get_string('compare-symbol') !== sym)
+                return;
+            this._cmpHist = hist;
+            this._chart.queue_draw();
+            this._updateCmpChip();
+            if (GLib.getenv('TG_TIMING'))
+                log(`TG cmp ${sym} ${range} (${hist.points.length} pts)`);
+        } catch (e) {
+            log(`TG cmp ${sym} failed: ${e.message}`);
+            if (this._cmpKey === key)
+                this._cmpKey = null;      // retryable
+            this._cmpHist = null;
+            this._chart.queue_draw();
+            this._updateCmpChip();
+        }
+    }
+
+    _updateCmpChip() {
+        const sym = this._settings.get_string('compare-symbol');
+        if (!sym || sym === this._hero()) {
+            this._cmpBtn.set_label('vs Off');
+            this._cmpBtn.set_tooltip_text('Compare against');
+            return;
+        }
+        // window move of the benchmark, straight from its own series
+        const pts = this._cmpHist?.points;
+        let pct = null;
+        if (pts?.length > 1 && pts[0].c)
+            pct = (pts.at(-1).c / pts[0].c - 1) * 100;
+        this._cmpBtn.set_label(
+            pct == null ? `vs ${sym}`
+                        : `vs ${sym} ${fmtPct(pct / 100)}`);
+        this._cmpBtn.set_tooltip_text(
+            `Overlay ${sym}, normalized to ${this._hero()}'s first point`);
     }
 
     /* ── news ─────────────────────────────────────────────────────────── */
@@ -2155,20 +2362,34 @@ class TickerWindow extends Adw.ApplicationWindow {
             const row = new Gtk.ListBoxRow();
             row._url = n.url;
             row._title = n.title;
-            const box = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL,
-                                     spacing: 2, margin_start: 12,
-                                     margin_end: 12, margin_top: 8,
-                                     margin_bottom: 8});
+            const line = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
+                                      spacing: 10, margin_start: 12,
+                                      margin_end: 12, margin_top: 8,
+                                      margin_bottom: 8});
+            // site icon: favicon when known, letter avatar meanwhile
+            const av = new Gtk.DrawingArea();
+            av.set_content_width(20);
+            av.set_content_height(20);
+            av.set_valign(Gtk.Align.CENTER);
+            av._host = hostOf(n.url);
+            av._letter = ((n.source || av._host || '?').trim()[0] ?? '?')
+                .toUpperCase();
+            av.set_draw_func(paintFav);
+            favAttach(av);
+            line.append(av);
+            const txt = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL,
+                                     spacing: 2, hexpand: true});
             const title = new Gtk.Label({label: n.title, xalign: 0,
                                          wrap: true, ellipsize: 3});
             title.set_lines(2);
             title.add_css_class('tg-news-title');
-            box.append(title);
+            txt.append(title);
             const sub = new Gtk.Label({
                 label: [n.source, relTime(n.at)].filter(Boolean).join('  ·  '),
                 xalign: 0, css_classes: ['dim-label', 'caption']});
-            box.append(sub);
-            row.set_child(box);
+            txt.append(sub);
+            line.append(txt);
+            row.set_child(line);
             list.append(row);
         }
     }
@@ -2263,6 +2484,16 @@ class TickerWindow extends Adw.ApplicationWindow {
             return;
         }
         const intraday = INTRADAY.has(hist.range);
+        // rescale the benchmark into the primary's price space so both
+        // lines share their first point (0% move) and the y-axis stays
+        // honest in the hero's own currency
+        let cmp = null;
+        const cp = this._cmpHist?.range === hist.range
+            ? this._cmpHist.points : null;
+        if (cp?.length > 1 && hist.points[0]?.c && cp[0].c) {
+            const p0 = hist.points[0].c, c0 = cp[0].c;
+            cmp = {points: cp.map(p => ({t: p.t, c: p0 * (p.c / c0)}))};
+        }
         paintChart(cr, {
             w, h,
             points: hist.points,
@@ -2274,6 +2505,7 @@ class TickerWindow extends Adw.ApplicationWindow {
                                 : axisDate(t, (hist.points[hist.points.length - 1].t - hist.points[0].t) / 86400),
             progress: this._progress,
             cursor: this._cursor,
+            compare: cmp,
         });
     }
 
@@ -2590,12 +2822,21 @@ class TickerWindow extends Adw.ApplicationWindow {
         case 'selected-symbol':
             this._updateHero();
             this._loadHistory();
+            this._loadCompare();
             break;
         case 'chart-range':
         case 'chart-interval':
             this._updateHero();
             this._loadHistory();
+            this._loadCompare();
             break;
+        case 'compare-symbol': {
+            // external flips (other window) re-sync the menu state too
+            const s = this._settings.get_string('compare-symbol');
+            this._cmpAction.set_state(new GLib.Variant('s', s || 'off'));
+            this._loadCompare();
+            break;
+        }
         case 'chart-style':
             this._updateHero();
             this._chart.queue_draw();

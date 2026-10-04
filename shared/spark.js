@@ -175,6 +175,7 @@ export function paintChart(cr, opts) {
         fmtY = v => String(v), fmtX = () => '',
         showY = true, showX = true, dark = true,
         progress = 1, cursor = null, accent = null,
+        compare = null,           // normalized 2nd series: {points:[{t,c}]}
     } = opts;
 
     const n = points?.length ?? 0;
@@ -200,6 +201,15 @@ export function paintChart(cr, opts) {
     if (prevClose != null) {
         lo = Math.min(lo, prevClose);
         hi = Math.max(hi, prevClose);
+    }
+    /* the compare series shares this price space, so widen the y-window
+     * to its extremes too: both lines stay fully visible */
+    const cmp = compare?.points?.length >= 2 ? compare.points : null;
+    if (cmp) {
+        for (const p of cmp) {
+            if (p.c > hi) hi = p.c;
+            if (p.c < lo) lo = p.c;
+        }
     }
     const midp = (lo + hi) / 2 || 1e-9;
     const padY = Math.max((hi - lo) * 0.10, Math.abs(midp) * 1e-6, 1e-9);
@@ -276,6 +286,21 @@ export function paintChart(cr, opts) {
         cr.setLineWidth(2);
         cr.setLineJoin(Cairo.LineJoin.ROUND);
         cr.setLineCap(Cairo.LineCap.ROUND);
+        cr.stroke();
+    }
+
+    /* compare overlay: thinner, fixed blue, own x mapping (its bar count
+     * can differ from the primary), rides the same reveal animation */
+    if (cmp) {
+        const m = cmp.length;
+        const drawnC = Math.max(2, Math.ceil(m * Math.min(1, progress)));
+        cr.newPath();
+        tracePath(cr, cmp.slice(0, drawnC).map(
+            (p, i) => [GUT_L + i * cw / (m - 1), Y(p.c)]));
+        cr.setSourceRGBA(0.384, 0.627, 0.918, 0.85);   // Adwaita blue-2
+        cr.setLineWidth(1.4);
+        cr.setLineJoin(Cairo.LineJoin.ROUND);
+        cr.setLineCap(Cairo.LineJoin.ROUND);
         cr.stroke();
     }
 

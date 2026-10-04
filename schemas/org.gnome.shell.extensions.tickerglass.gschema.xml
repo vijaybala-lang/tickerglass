@@ -104,6 +104,12 @@
       </choices>
       <summary>Chart style</summary>
     </key>
+    <key name="compare-symbol" type="s">
+      <default>''</default>
+      <summary>Chart comparison overlay</summary>
+      <description>Symbol overlaid on the hero chart, normalized to the
+        primary's first point (e.g. QQQ). Empty means no comparison.</description>
+    </key>
 
     <!-- ── table (app), also drives the card row fields ─────────────────
          JSON: {"visible":["symbol","price",…],"sort":"symbol","asc":true}
