@@ -107,12 +107,15 @@ class TickerGlassApp extends Adw.Application {
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), this._cssAccent,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 20);
-        // shortcuts → window actions
-        this.set_accels_for_action('win.refresh', ['F5', 'r']);
+        // shortcuts → window actions. Refresh is F5 / Ctrl-R, NOT bare
+        // “r”: a single letter bound as a window accelerator fires on
+        // keypress and is swallowed before the search entry can insert
+        // it, so typing any symbol containing “r” (ZBRA, ARKK…) broke.
+        // Single-letter “focus search” (slash) is kept but scoped below.
+        this.set_accels_for_action('win.refresh', ['F5', '<Primary>r']);
         this.set_accels_for_action('win.readerback', ['Escape']);
         this.set_accels_for_action('win.search', ['<Primary>f', 'slash']);
         this.set_accels_for_action('win.sidebar', ['F9']);
-        this.set_accels_for_action('win.search', ['slash', '<Primary>f']);
         this.set_accels_for_action('win.newlist', ['<Primary>n']);
         this.set_accels_for_action('win.prefs', ['<Primary>comma']);
     }

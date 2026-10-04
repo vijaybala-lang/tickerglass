@@ -165,6 +165,22 @@ class TickerWindow extends Adw.ApplicationWindow {
                 });
                 return GLib.SOURCE_REMOVE;
             });
+        // TG_KEYTEST: types through REAL key events (Gtk.Test), which
+        // traverses the full input pipeline including window
+        // accelerators — set_text() cannot catch swallowed characters
+        if (GLib.getenv('TG_KEYTEST'))
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 3000, () => {
+                const e = this._searchEntry;
+                e.grab_focus();
+                try {
+                    Gtk.Test.enter_text(e, 'zbra');
+                } catch (err) {
+                    log(`TG_KEYTEST enter failed: ${err}`);
+                }
+                log(`TG_KEYTEST typed=zbra result=<<${e.get_text()}>>`);
+                this.get_application().quit();
+                return GLib.SOURCE_REMOVE;
+            });
     }
 
     /* ── UI construction ──────────────────────────────────────────────── */
@@ -194,6 +210,21 @@ class TickerWindow extends Adw.ApplicationWindow {
         hbar.pack_end(search);
         this._searchEntry = search;
         this._buildSearchPopover(search);
+        if (GLib.getenv('TG_DEBUGKEYS')) {
+            const mk = (name, wid) => {
+                const kc = new Gtk.EventControllerKey();
+                kc.set_propagation_phase(Gtk.PropagationPhase.CAPTURE);
+                kc.connect('key-pressed', (c, kv, code, st) => {
+                    log(`TGKEY ${name} kv=${Gtk.keyval_name(kv)}`);
+                    return false;
+                });
+                wid.add_controller(kc);
+            };
+            mk('win', this);
+            mk('entry', search);
+            search.connect('search-changed',
+                () => log(`TGKEY text=<<${search.get_text()}>>`));
+        }
 
         // reading mode replaces the ticker chrome entirely (back pill,
         // article title, open-externally) — toggled per visible page below
