@@ -919,7 +919,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         // dropdown picking the active watchlist (the extension follows live)
         const chooser = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
                                      margin_start: 10, margin_end: 10,
-                                     margin_top: 2, spacing: 4});
+                                     margin_top: 8, spacing: 4});
         this._wlStrings = new Gtk.StringList();
         this._wlDrop = new Gtk.DropDown({model: this._wlStrings,
                                          hexpand: true});
