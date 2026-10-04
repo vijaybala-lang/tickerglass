@@ -327,6 +327,8 @@ list row { border-radius: 12px; }
 
 /* sidebar watchlist rows + news list */
 .tg-row-sym { font-weight: 700; }
+/* company name under the symbol: clearly secondary */
+.tg-row-name { font-size: 0.78em; }
 .tg-news-title { font-weight: 600; }
 
 /* resize divider between sidebar and content: a hairline that only

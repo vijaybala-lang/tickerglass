@@ -1398,7 +1398,25 @@ class TickerWindow extends Adw.ApplicationWindow {
             symL.add_css_class('tg-row-sym');
             symL.set_max_width_chars(10);
             symL.set_selectable(false);
-            box.append(symL);
+            // company name under the symbol, one notch smaller.
+            // Ellipsized for long names — but can_target(false): GTK
+            // auto-marks ellipsized labels selectable at layout, and
+            // a selectable label's text DragSource hijacks the row
+            // reorder drag (the historical symL bug). Dead to the
+            // pointer, the ellipsis is safe.
+            const nameL = new Gtk.Label({label: '', xalign: 0,
+                                         ellipsize: 3,
+                                         max_width_chars: 14,
+                                         css_classes: ['dim-label'],
+                                         can_target: false});
+            nameL.add_css_class('tg-row-name');
+            const symCol = new Gtk.Box({
+                orientation: Gtk.Orientation.VERTICAL, spacing: 0,
+                valign: Gtk.Align.CENTER});
+            symCol.append(symL);
+            symCol.append(nameL);
+            row._nameL = nameL;
+            box.append(symCol);
             const spark = new Gtk.DrawingArea({content_width: 56,
                                                content_height: 22});
             spark.set_hexpand(true);
@@ -1826,6 +1844,8 @@ class TickerWindow extends Adw.ApplicationWindow {
             const q = this._quoteOf(sym);
             row._priceL.set_text(q?.price != null
                 ? fmtPrice(q.price, q.currency) : '—');
+            if (row._nameL && q?.name)
+                row._nameL.set_text(q.name);
             row._pctL.set_text(q?.changePct != null
                 ? fmtPct(q.changePct) : '');
             const pUp = (q?.change ?? q?.changePct ?? 0) >= 0;
