@@ -219,7 +219,9 @@ window { font-family: Inter, Cantarell, sans-serif; }
  * inset box-shadow on rounded navigation-sidebar rows rendered
  * curved and offset, which read as a broken line */
 .tg-dropbar {
-  background: @accent_bg_color;
+  /* exact GNOME blue, not @accent_bg_color — that follows whatever
+   * accent the user's theme sets, which isn't necessarily blue */
+  background: #3584e4;
   border-radius: 2px;
   margin: 0 10px;
   min-height: 2px;
