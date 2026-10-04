@@ -102,13 +102,11 @@ window { font-family: Inter, Cantarell, sans-serif; }
  * accent ink plus a slim accent underline, and geometry is
  * identical across states */
 /* header nav lives in a .linked cluster (sidebar's button-bar
- * recipe) — theme-default buttons provide the segmented skin, so
- * .tg-tab only sizes them and states the active view: accent ink
- * on a soft accent wash, no pills, no underlines */
-.tg-tab {
-  min-height: 0;
-  padding: 3px 12px;
-}
+ * recipe). Live probe: theme-default linked buttons measure
+ * identically in titlebar and sidebar placements (24x24) — so
+ * .tg-tab adds NO padding of its own; the bars share exact
+ * metrics. Only the label voice and the active state are ours:
+ * accent ink on a soft accent wash. */
 .tg-tab label { font-size: 0.9em; font-weight: 600; }
 .tg-tab-active,
 .tg-tab-active:hover {
