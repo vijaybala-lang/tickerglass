@@ -873,9 +873,14 @@ class TickerWindow extends Adw.ApplicationWindow {
                 item.set_child(new Gtk.Label({ellipsize: 3, xalign: 0,
                                               max_width_chars: 14})));
             f.connect('bind', (fac, item) => {
-                const s = item.get_item();
-                item.get_child().set_text(
-                    typeof s === 'string' ? s : String(s ?? ''));
+                // StringList items arrive as Gtk.StringObject wrappers
+                // in this GJS, NOT JS strings: String(v) gives
+                // "[object instance wrapper GIName:Gtk.StringObject]"
+                // (live-probed). The real text is v.string.
+                const v = item.get_item();
+                const text = typeof v === 'string' ? v
+                           : (v?.string ?? '');
+                item.get_child().set_text(text);
             });
             this._wlDrop.set_factory(f);
         }
