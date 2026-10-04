@@ -12,6 +12,18 @@ import Pango from 'gi://Pango';
 import PangoCairo from 'gi://PangoCairo';
 import {COLORS} from './fmt.js';
 
+/* adaptive ink for solid fills (weatherglass mechanism, but with true
+ * WCAG relative luminance: the accent mirror's sRGB-weighted shortcut
+ * calls white-on-#00b562 readable at 136/150 when it measures 2.7:1).
+ * Linearize, compare white vs black contrast: white wins below
+ * L≈0.18, black above — green/red/blue pills all land on black. */
+function inkFor([r, g, b]) {
+    const lin = v => v <= 0.04045 ? v / 12.92
+                                  : ((v + 0.055) / 1.055) ** 2.4;
+    const L = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+    return L < 0.18 ? [1, 1, 1, 1] : [0.1, 0.11, 0.13, 0.95];
+}
+
 /* GJS Pango bindings flip snake/camel between releases — feature-detect. */
 function call(obj, camel, snake, ...args) {
     const fn = obj[camel] ?? obj[snake];
@@ -331,7 +343,7 @@ export function paintChart(cr, opts) {
         cr.setSourceRGBA(rgb[0], rgb[1], rgb[2], 0.95);
         cr.fill();
         drawText(cr, label, bx + pw / 2, 0, {
-            size: 9, bold: true, rgba: [1, 1, 1, 1], vcenter: y,
+            size: 9, bold: true, rgba: inkFor(rgb), vcenter: y,
         });
         /* the benchmark anchors its own ending value below/above it:
          * blue fill, dark ink (blue-2 is too light for white), and a
@@ -352,7 +364,7 @@ export function paintChart(cr, opts) {
             cr.setSourceRGBA(0.384, 0.627, 0.918, 0.95);
             cr.fill();
             drawText(cr, el, bx + epw / 2, 0, {
-                size: 9, bold: true, rgba: [0.1, 0.11, 0.13, 0.95],
+                size: 9, bold: true, rgba: inkFor([0.384, 0.627, 0.918]),
                 vcenter: cy,
             });
         }
