@@ -890,14 +890,30 @@ class TickerWindow extends Adw.ApplicationWindow {
                                        css_classes: ['heading']});
         sideLbl.set_valign(Gtk.Align.CENTER);
         sideHead.append(sideLbl);
+        // ALL list-level actions live here as one linked cluster:
+        // new / rename / delete. (Rename + delete used to share the
+        // dropdown's row and ate its width at narrow sidebars; the
+        // picker now owns a full-width row.)
+        const listBtns = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
+                                      css_classes: ['linked'],
+                                      halign: Gtk.Align.END,
+                                      hexpand: true,
+                                      valign: Gtk.Align.CENTER});
         const newBtn = new Gtk.Button({icon_name: 'list-add-symbolic',
                                        tooltip_text: 'New list (Ctrl+N)'});
-        newBtn.add_css_class('flat');
         newBtn.set_action_name('win.newlist');
-        newBtn.set_halign(Gtk.Align.END);
-        newBtn.set_hexpand(true);
-        newBtn.set_valign(Gtk.Align.CENTER);
-        sideHead.append(newBtn);
+        listBtns.append(newBtn);
+        const renameBtn = new Gtk.Button({icon_name: 'document-edit-symbolic',
+                                          tooltip_text: 'Rename current list'});
+        renameBtn.connect('clicked', () =>
+            this._renameList(this._settings.get_string('active-watchlist')));
+        listBtns.append(renameBtn);
+        const delBtn = new Gtk.Button({icon_name: 'user-trash-symbolic',
+                                       tooltip_text: 'Delete current list'});
+        delBtn.connect('clicked', () =>
+            this._deleteList(this._settings.get_string('active-watchlist')));
+        listBtns.append(delBtn);
+        sideHead.append(listBtns);
         sideBox.append(sideHead);
 
         // dropdown picking the active watchlist (the extension follows live)
@@ -938,18 +954,6 @@ class TickerWindow extends Adw.ApplicationWindow {
                 this._settings.set_string('active-watchlist', wl.id);
         });
         chooser.append(this._wlDrop);
-        const renameBtn = new Gtk.Button({icon_name: 'document-edit-symbolic',
-                                          tooltip_text: 'Rename current list'});
-        renameBtn.add_css_class('flat');
-        renameBtn.connect('clicked', () =>
-            this._renameList(this._settings.get_string('active-watchlist')));
-        chooser.append(renameBtn);
-        const delBtn = new Gtk.Button({icon_name: 'user-trash-symbolic',
-                                       tooltip_text: 'Delete current list'});
-        delBtn.add_css_class('flat');
-        delBtn.connect('clicked', () =>
-            this._deleteList(this._settings.get_string('active-watchlist')));
-        chooser.append(delBtn);
         sideBox.append(chooser);
 
         // the watchlist itself: symbol + sparkline + price per row
