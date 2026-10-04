@@ -978,6 +978,21 @@ class TickerWindow extends Adw.ApplicationWindow {
         {
             const symOv = new Gtk.Overlay();
             symOv.set_child(this._symList);
+            this._symOv = symOv;
+            this._symAdj = symScroll.get_vadjustment();
+            // the drop-position bar: a real overlay widget, not a box-
+            // shadow on the row — adwaita sidebar rows are rounded
+            // cards, so an inset line on them renders curved and
+            // margin-offset ("the line doesn't render correctly").
+            // translate_coordinates places it exactly on a boundary,
+            // scroll offset included.
+            this._dropBar = new Gtk.Box({
+                css_classes: ['tg-dropbar'],
+                halign: Gtk.Align.FILL, valign: Gtk.Align.START,
+                height_request: 2,
+            });
+            this._dropBar.set_visible(false);
+            symOv.add_overlay(this._dropBar);
             this._ghost = new Gtk.Box({
                 css_classes: ['tg-ghost'],
                 halign: Gtk.Align.START, valign: Gtk.Align.START,
@@ -1661,7 +1676,8 @@ class TickerWindow extends Adw.ApplicationWindow {
                 const from0 = wl0 ? wl0.symbols.indexOf(row._sym) : 0;
                 this._ghost.set_size_request(-1,
                     Math.max(rowH - 6, 24));
-                this._ghost.set_margin_top(Math.max(0, from0 * rowH));
+                this._ghost.set_margin_top(Math.max(0, from0 * rowH -
+                    (this._symAdj?.get_value() ?? 0)));
                 this._ghost.set_visible(true);
             }
             if (seq)
@@ -1694,26 +1710,36 @@ class TickerWindow extends Adw.ApplicationWindow {
                 from + (Math.sign(y) * Math.floor(Math.abs(y) / rowH))));
             moved = to !== from;
             if (this._ghost)
-                this._ghost.set_margin_top(
-                    Math.max(0, from * rowH + y - rowH / 3));
-            // line at the future slot: top edge of the row being pushed
-            // down (bottom edge when dropping past the very last row)
+                this._ghost.set_margin_top(Math.max(0,
+                    from * rowH + y - rowH / 3 -
+                    (this._symAdj?.get_value() ?? 0)));
+            // where the bar sits: `to` is the row's FINAL index, so
+            // the boundary depends on direction — rows ABOVE the
+            // source don't shift (dragging up), but the source's own
+            // slot collapsing shifts everything below it up by one
+            // (dragging down). Drawing kids[to] "above" for both was
+            // the off-by-one: a down-drag landed one slot under its
+            // own line. Down: bar BELOW original row `to`. Up: above.
             const kids = [];
             for (let c = this._symList.get_first_child(); c;
                  c = c.get_next_sibling())
                 kids.push(c);
-            let tgt = null, cls = 'tg-drop-line';
-            if (y > 0 && to === kids.length - 1 && from < to) {
-                tgt = kids[kids.length - 1];
-                cls = 'tg-drop-below';
-            } else {
-                tgt = kids[to];
-            }
-            if (tgt && tgt !== this._dropLineRow) {
-                this._clearDropLine();
-                tgt.add_css_class(cls);
-                this._dropLineRow = tgt;
-                this._dropLineCls = cls;
+            const tgt = kids[to];
+            const below = to > from;
+            if (this._dropBar) {
+                if (tgt) {
+                    // exact boundary in overlay coords: translate runs
+                    // through the real transform, so a scrolled list
+                    // lands the bar where it VISUALLY belongs
+                    const tr = tgt.translate_coordinates(
+                        this._symOv, 0, 0);
+                    if (tr[0])
+                        this._dropBar.set_margin_top(Math.round(
+                            tr[2] + (below ? tgt.get_height() : 0)));
+                    this._dropBar.set_visible(true);
+                } else {
+                    this._dropBar.set_visible(false);
+                }
             }
             if (gdb && ++upd < 4)
                 log(`GESTURE row-drag ${row._sym} dy=${Math.round(y)} `
@@ -1757,6 +1783,10 @@ class TickerWindow extends Adw.ApplicationWindow {
      * have replaced that widget under us — remove_css_class on a dead
      * row is harmless, but we drop the stale ref here) */
     _clearDropLine() {
+        if (this._dropBar) {          // overlay bar era: one hide
+            this._dropBar.set_visible(false);
+            return;
+        }
         if (this._dropLineRow) {
             this._dropLineRow.remove_css_class(this._dropLineCls ||
                 'tg-drop-line');
