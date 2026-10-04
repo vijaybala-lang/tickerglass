@@ -25,6 +25,8 @@ glib-compile-schemas "$EXT/schemas"
 cp "$ROOT"/app/{main.js,window.js,style.css,night.css} "$APP/"
 cp "$ROOT"/shared/{fmt.js,mock.js,yahoo.js,spark.js,prompt.js} "$APP/"
 cp "$ROOT"/app/dev.vijaybala.TickerGlass.desktop "$APP/"
+# custom symbolic icons (hicolor tree, added to the theme search path)
+cp -r "$ROOT"/app/icons "$APP/icons"
 
 echo "built: $EXT"
 echo "built: $APP"

@@ -96,21 +96,22 @@ window { font-family: Inter, Cantarell, sans-serif; }
   border-color: alpha(currentcolor, 0.35);
 }
 
-/* icon-only nav-bar buttons (Watchlist | Movers in the header):
- * flat symbolics, quiet until hovered. Symbolic icons re-tint to
- * the CSS color, so the ACTIVE page needs no shape change — it
- * takes the accent ink plus a slim accent underline, and geometry
- * is identical across states */
+/* icon + label nav buttons (Watchlist | Movers in the header):
+ * flat, quiet until hovered. Symbolic icons re-tint to the CSS
+ * color, so the ACTIVE page needs no shape change — it takes the
+ * accent ink plus a slim accent underline, and geometry is
+ * identical across states */
 .tg-tab {
   background: none;
   border: none;
   box-shadow: none;
-  padding: 5px 9px;
+  padding: 4px 10px;
   margin: 0;
   min-height: 0;
   border-radius: 8px;
   opacity: 0.72;
 }
+.tg-tab label { font-size: 0.9em; font-weight: 600; }
 .tg-tab:hover {
   background: alpha(currentcolor, 0.07);
   opacity: 1;

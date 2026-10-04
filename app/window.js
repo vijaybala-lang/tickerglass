@@ -346,21 +346,40 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._searchEntry = search;
         this._buildSearchPopover(search);
         // page navigation right beside the search: Watchlist ↔ Movers.
-        // Icon-only nav bar (.tg-tab): stock symbolics (probe-verified
-        // present — chart-line-symbolic does NOT exist on this box),
-        // active page = accent-tinted icon + slim underline. Tooltips
-        // carry the names.
+        // Icon + label nav (.tg-tab): the movers glyph is the app's
+        // own up/down triangle pair, shipped as a symbolic next to
+        // the code so it recolors like stock icons — the adwaita set
+        // has no up+down arrow (probe-verified). Label to the RIGHT:
+        // the header is a fixed-height horizontal bar; labels under
+        // icons would force a taller bar or microscopic text.
+        try {
+            // GTK4 on this build resolves a search path that points AT
+            // the context dir (…/hicolor/scalable/actions) — probe-
+            // verified: the hicolor and scalable parents come up false
+            const idir = Gio.File.new_for_uri(import.meta.url)
+                .get_parent().get_child('icons')
+                .get_child('hicolor').get_child('scalable')
+                .get_child('actions').get_path();
+            Gtk.IconTheme.get_for_display(this.get_display())
+                .add_search_path(idir, -1);
+        } catch (e) {
+            log(`icon path unavailable: ${e.message}`);
+        }
         const navBox = new Gtk.Box({spacing: 4, valign: Gtk.Align.CENTER});
         this._navChips = {};
-        for (const [key, icon, tip, view] of [
-                ['watch', 'starred-symbolic',
-                 'Watchlist — your symbols  ( Alt+1 )', 'chart'],
-                ['movers', 'go-up-symbolic',
+        for (const [key, icon, name, tip, view] of [
+                ['watch', 'starred-symbolic', 'Watchlist',
+                 'Your symbols  ( Alt+1 )', 'chart'],
+                ['movers', 'tg-movers-symbolic', 'Movers',
                  'Top movers — gainers & losers  ( Alt+2 )',
                  'movers']]) {
-            const b = new Gtk.Button({icon_name: icon,
-                                      css_classes: ['tg-tab'],
+            const b = new Gtk.Button({css_classes: ['tg-tab'],
                                       tooltip_text: tip});
+            const inner = new Gtk.Box({
+                orientation: Gtk.Orientation.HORIZONTAL, spacing: 6});
+            inner.append(new Gtk.Image({icon_name: icon}));
+            inner.append(new Gtk.Label({label: name}));
+            b.set_child(inner);
             b.connect('clicked', () =>
                 this.activate_action('view', new GLib.Variant('s', view)));
             navBox.append(b);

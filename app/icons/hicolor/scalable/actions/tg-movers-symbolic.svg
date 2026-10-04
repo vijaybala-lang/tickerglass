@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Movers nav glyph: the app's rimmed-triangle motif, up + down pair.
+     -symbolic.svg => GTK recolors it to the CSS color (accent when
+     active). Same-winding subpaths union cleanly under the nonzero
+     fill rule, so overlaps never double-darken. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <path fill="#bebebe" fill-rule="nonzero" d="M4.6 1.6 L8 6.1 L1.2 6.1 Z
+      M3.4 5.4 H5.8 V11.2 H3.4 Z
+      M11.4 14.4 L8 9.9 L14.8 9.9 Z
+      M10.2 10.6 H12.6 V4.8 H10.2 Z"/>
+</svg>
