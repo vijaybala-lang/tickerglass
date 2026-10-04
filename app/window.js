@@ -971,12 +971,35 @@ class TickerWindow extends Adw.ApplicationWindow {
         });
         gripDrag.connect('drag-update', (g, x) => {
             // no GLib.clamp in this GLib — plain Math
-            this._sidePx = Math.min(480, Math.max(180,
-                                       Math.round(this._gripStart + x)));
-            this._applySidebarWidth();
+            const px = Math.min(480, Math.max(180,
+                                   Math.round(this._gripStart + x)));
+            if (px === this._sidePx)
+                return;
+            this._sidePx = px;
+            // Coalesce to ONE relayout per main-loop cycle. A high-
+            // polling mouse fires drag-update far faster than frames;
+            // each set_property forces a full split relayout + chart
+            // repaint, and only the newest value ever reaches the
+            // screen. A high-idle one-shot drains all queued motion
+            // events first, then applies once — not on the frame
+            // clock's pre-render 'update', which would queue a second
+            // frame per step (that double-buffering is what stuttered).
+            if (this._sideIdle)
+                return;
+            this._sideIdle = GLib.idle_add(GLib.PRIORITY_HIGH_IDLE, () => {
+                this._sideIdle = 0;
+                this._applySidebarWidth();
+                return GLib.SOURCE_REMOVE;
+            });
         });
-        gripDrag.connect('drag-end', () =>
-            this._settings.set_int('sidebar-width', this._sidePx));
+        gripDrag.connect('drag-end', () => {
+            if (this._sideIdle) {
+                GLib.source_remove(this._sideIdle);
+                this._sideIdle = 0;
+            }
+            this._applySidebarWidth();   // land exactly on the final px
+            this._settings.set_int('sidebar-width', this._sidePx);
+        });
         grip.add_controller(gripDrag);
         // GTK CSS has no `cursor`; the col-resize pointer lives on the
         // widget so it appears on hover over the 7px strip
