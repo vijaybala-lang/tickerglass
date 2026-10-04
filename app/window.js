@@ -1398,6 +1398,7 @@ class TickerWindow extends Adw.ApplicationWindow {
             symL.add_css_class('tg-row-sym');
             symL.set_max_width_chars(10);
             symL.set_selectable(false);
+            box.append(symL);
             // company name rides BELOW the whole top line (symbol +
             // sparkline + price), so the sparkline keeps an identical
             // baseline in every row. Ellipsized for long names — but
