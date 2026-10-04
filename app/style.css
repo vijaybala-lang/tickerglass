@@ -112,7 +112,10 @@ window { font-family: Inter, Cantarell, sans-serif; }
 .tg-tab-active:hover {
   color: @accent_color;
   background-image: none;
-  background-color: alpha(@tg-accent, 0.16);
+  /* soft neutral gray, not the accent wash — reads as a lit
+   * segment in both themes (light: faint gray pill; night: mild
+   * luminance lift), leaving green ink as the sole accent signal */
+  background-color: alpha(#9a9a9a, 0.28);
 }
 
 /* static stat chips under the hero price */
