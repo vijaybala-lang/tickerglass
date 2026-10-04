@@ -19,30 +19,34 @@ export function textPrompt({parent, title, initial = '',
                              spacing: 10});
     const entry = new Adw.EntryRow({title, text: initial});
     box.append(entry);
-    // Match Adw.AlertDialog's response row (the delete-confirm look):
-    // CENTERED pill buttons with a shared min width, not a full-width
-    // button bar. The content slot that would let us reuse AlertDialog
-    // itself is withheld by this Fedora's typelib (probed), so the
-    // look is replicated: pill is libadwaita-native, min width is set
-    // in code so the shared file needs no stylesheet — the extension
-    // gets the identical dialogs for free.
+    // Mirror Adw.AlertDialog's response row exactly (probed its widget
+    // tree): response-area buttons are NOT flat — libadwaita styles
+    // 'dialog .response-area button' with its own muted ink, and
+    // slapping .flat on ours overrode it to window-fg (the color
+    // mismatch). So: same classes libadwaita uses (bare text-button),
+    // a 'response-area' parent box, pill geometry replicated since
+    // that look lives in '.alert-dialog .text-button.pill' which
+    // won't match our box name.
     const btnRow = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
-                                spacing: 6, halign: Gtk.Align.CENTER});
+                                spacing: 6,
+                                css_classes: ['response-area'],
+                                halign: Gtk.Align.CENTER});
     const cancel = new Gtk.Button({label: _('Cancel')});
-    cancel.add_css_class('flat');
     cancel.add_css_class('pill');
-    cancel.set_size_request(120, -1);
+    cancel.set_size_request(124, 24);
     cancel.connect('clicked', () => dlg.force_close());
     const btn = new Gtk.Button({label: acceptLabel});
     btn.add_css_class('suggested-action');
     btn.add_css_class('pill');
-    btn.set_size_request(120, -1);
+    btn.set_size_request(124, 24);
     btnRow.append(cancel);
     btnRow.append(btn);
     box.append(btnRow);
 
     let done = false;
     const accept = () => {
+        if (done)
+            return;   // Enter, ✓-apply and the button can race
         const text = entry.get_text().trim();
         if (!text)
             return;
@@ -51,6 +55,7 @@ export function textPrompt({parent, title, initial = '',
         dlg.force_close();
     };
     entry.connect('entry-activated', accept);
+    entry.connect('apply', accept);   // EntryRow's own ✓ button
     btn.connect('clicked', accept);
 
     const clamp = new Adw.Clamp({maximum_size: 360, child: box});
