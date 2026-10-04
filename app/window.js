@@ -977,12 +977,25 @@ class TickerWindow extends Adw.ApplicationWindow {
         gripDrag.set_button(1);
         gripDrag.connect('drag-begin', () => {
             this._gripStart = this._sidePx;
+            // where the grip sits in WINDOW coords at press time
+            this._gripOriginX = grip.translate_coordinates(
+                this, 0, 0)[1];
             this._resizing = true;
         });
         gripDrag.connect('drag-update', (g, x) => {
+            // GestureDrag reports its offset in the GRIP's local space.
+            // But the grip itself slides as the sidebar resizes, so a
+            // still pointer's reported offset shrinks/grows by exactly
+            // that slide — a feedback loop that oscillates (live-
+            // probed: target 241<->229 in perfect lockstep with alloc
+            // 221<->233, "jumping between two sizes"). Adding the
+            // grip's true window-space displacement back recovers the
+            // pointer's actual travel and breaks the loop.
+            const slide = grip.translate_coordinates(
+                this, 0, 0)[1] - this._gripOriginX;
             // no GLib.clamp in this GLib — plain Math
             const px = Math.min(480, Math.max(180,
-                                   Math.round(this._gripStart + x)));
+                                   Math.round(this._gripStart + x + slide)));
             if (px === this._sidePx)
                 return;
             this._sidePx = px;
