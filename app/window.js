@@ -959,6 +959,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         });
         chooser.append(this._wlDrop);
         sideBox.append(chooser);
+        this._installEscLeavesEdit();
 
         // the watchlist itself: symbol + sparkline + price per row
         this._symList = new Gtk.ListBox({vexpand: true});
@@ -1870,6 +1871,23 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._dropLineRow = null;
             this._dropLineCls = null;
         }
+    }
+
+    /* Esc leaves Remove-tickers mode — the universal 'never mind'
+     * key. Window-level controller: dialogs are separate surfaces
+     * that eat their own Escape, and Popovers close on Escape
+     * before the window ever sees it, so this only fires when a
+     * mode is the topmost thing to dismiss. */
+    _installEscLeavesEdit() {
+        const kc = new Gtk.EventControllerKey();
+        kc.connect('key-pressed', (c, keyval) => {
+            if (keyval === Gdk.KEY_Escape && this._editMode) {
+                this._setEditMode(false);
+                return true;   // consumed
+            }
+            return false;
+        });
+        this.add_controller(kc);
     }
 
     /* commit a live-drag displacement to the SYMBOL ARRAY — the widget
