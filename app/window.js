@@ -676,8 +676,12 @@ class TickerWindow extends Adw.ApplicationWindow {
         const movWrap = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL,
                                      margin_start: 12, margin_end: 12,
                                      margin_top: 8, spacing: 2});
-        const movHeadRow = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
-                                        spacing: 8});
+        // row 1: page title (+ the window picker riding at its right).
+        // The picker lives HERE, not with the scope chips, so hiding or
+        // disabling it can never slide the chips around: the title is
+        // left-aligned and the spacer eats whatever space is vacated.
+        const movTitleRow = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
+                                         spacing: 8});
         // page title names the window the ranking actually used — and
         // speaks in the hero name's voice (40px, .tg-page-title)
         this._movTitle = new Gtk.Label({label: '', xalign: 0,
@@ -685,8 +689,34 @@ class TickerWindow extends Adw.ApplicationWindow {
                                         // 10 grid margin + 14 card padding
                                         // = aligned with tile text
                                         margin_start: 24,
-                                        margin_bottom: 2});
-        movWrap.append(this._movTitle);
+                                        // row height is driven by this
+                                        // 40px label; the picker centers
+                                        // itself in it
+                                        margin_bottom: 4});
+        movTitleRow.append(this._movTitle);
+        const tSpacer = new Gtk.Box();
+        tSpacer.set_hexpand(true);
+        movTitleRow.append(tSpacer);
+        // sparkline window for the tiles + the table's spark column
+        this._mvSparkBtn = new Gtk.MenuButton({label: 'Spark 1M',
+            tooltip_text: 'Window for the movers ranking and mini-charts '
+                        + '(Market scope is always today)',
+            valign: Gtk.Align.CENTER});
+        this._mvSparkBtn.add_css_class('flat');
+        {
+            const m = new Gio.Menu();
+            const sec = new Gio.Menu();
+            for (const [id, lbl] of [['1d', '1D'], ['5d', '1W'],
+                                     ['1mo', '1M'], ['6mo', '6M']])
+                sec.append(lbl, `win.spark::${id}`);
+            m.append_section(null, sec);
+            this._mvSparkBtn.set_menu_model(m);
+        }
+        movTitleRow.append(this._mvSparkBtn);
+        movWrap.append(movTitleRow);
+        // row 2: summary + scope chips — a constant geometry
+        const movHeadRow = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
+                                        spacing: 8});
         this._movSummary = new Gtk.Label({label: 'Waiting for quotes…',
                                           xalign: 0, hexpand: true,
                                           ellipsize: 3, margin_start: 24,
@@ -706,21 +736,6 @@ class TickerWindow extends Adw.ApplicationWindow {
             movHeadRow.append(b);
             this._mvScopeChips[val] = b;
         }
-        // sparkline window for the tiles + the table's spark column
-        this._mvSparkBtn = new Gtk.MenuButton({label: 'Spark 1M',
-            tooltip_text: 'Window for the movers ranking and mini-charts '
-                        + '(Market scope is always today)'});
-        this._mvSparkBtn.add_css_class('flat');
-        {
-            const m = new Gio.Menu();
-            const sec = new Gio.Menu();
-            for (const [id, lbl] of [['1d', '1D'], ['5d', '1W'],
-                                     ['1mo', '1M'], ['6mo', '6M']])
-                sec.append(lbl, `win.spark::${id}`);
-            m.append_section(null, sec);
-            this._mvSparkBtn.set_menu_model(m);
-        }
-        movHeadRow.append(this._mvSparkBtn);
         movWrap.append(movHeadRow);
         this._updateSparkBtn();
         const movScroll = new Gtk.ScrolledWindow({
