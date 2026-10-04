@@ -198,17 +198,6 @@ window { font-family: Inter, Cantarell, sans-serif; }
 }
 /* swipe-to-delete: the ✕ sits behind the row's right edge, revealed by
  * sliding the row's own clip leftwards (no tree changes, no grab) */
-.tg-del-reveal {
-    background: #c01c28;
-    border-radius: 8px;
-    margin: 2px 6px 2px 0;
-}
-.tg-del-reveal button {
-    background: transparent;
-    color: #ffffff;
-    font-weight: 700;
-    box-shadow: none;
-}
 /* reorder drag: ghost chip floats over the list (an overlay child — it
  * never touches the row under the pointer grab), and the accent line
  * marks the landing slot; inset shadow so rows never shift layout */
@@ -236,16 +225,18 @@ window { font-family: Inter, Cantarell, sans-serif; }
   min-height: 2px;
 }
 
-/* swipe-to-delete: the red ✕ pushed into the row's end */
+/* swipe-to-delete / edit-mode pill: a floating trash-can capsule at
+ * the row's right edge — vertical margins + full radius so it reads
+ * as an overlay, not a slice of the row */
 .tg-del-reveal {
   background: #f5455c;
   color: #ffffff;
   border: none;
-  border-radius: 8px;
-  font-weight: 700;
+  border-radius: 999px;
   padding: 0;
   min-width: 0;
-  min-height: 0;
+  min-height: 26px;
+  margin: 4px 4px 4px 0;
 }
 .tg-del-reveal:hover { background: alpha(#f5455c, 0.85); }
 

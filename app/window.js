@@ -1453,10 +1453,16 @@ class TickerWindow extends Adw.ApplicationWindow {
             // Vertical hold-drag is the DragSource's (long-press-to-move):
             // early pointer motion cancels DragSource's activation, so
             // the two never fight over the same press.
-            const delBtn = new Gtk.Button({label: '✕',
-                                           valign: Gtk.Align.FILL});
+            // trash pill: icon (not ✕ glyph), capsule via .pill +
+            // radius-999 CSS, floating on row margins — edit mode
+            // pins these on every row, swipe reveals one
+            const trashImg = new Gtk.Image({icon_name: 'user-trash-symbolic'});
+            trashImg.set_pixel_size(16);
+            const delBtn = new Gtk.Button({child: trashImg,
+                                           valign: Gtk.Align.CENTER});
             delBtn.set_visible(false);
             delBtn.add_css_class('tg-del-reveal');
+            delBtn.add_css_class('pill');
             delBtn.connect('clicked', () => {
                 this._setSwipe(row, false);
                 this._removeSymbol(sym);
