@@ -862,6 +862,23 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._wlStrings = new Gtk.StringList();
         this._wlDrop = new Gtk.DropDown({model: this._wlStrings,
                                          hexpand: true});
+        // ellipsizing label factory: the default DropDown renders the
+        // name in a label that refuses to shrink (min = natural = the
+        // longest list name, measured live at 220px), which pinned the
+        // whole sidebar's minimum width. With max-width-chars +
+        // ellipsize the min collapses and narrow widths just truncate.
+        {
+            const f = new Gtk.SignalListItemFactory();
+            f.connect('setup', (fac, item) =>
+                item.set_child(new Gtk.Label({ellipsize: 3, xalign: 0,
+                                              max_width_chars: 14})));
+            f.connect('bind', (fac, item) => {
+                const s = item.get_item();
+                item.get_child().set_text(
+                    typeof s === 'string' ? s : String(s ?? ''));
+            });
+            this._wlDrop.set_factory(f);
+        }
         this._wlDrop.connect('notify::selected', () => {
             if (this._suppressWl)
                 return;
@@ -938,7 +955,7 @@ class TickerWindow extends Adw.ApplicationWindow {
 
         this._split = new Adw.OverlaySplitView({
             sidebar: sidebar, show_sidebar: this._settings.get_boolean('sidebar-visible'),
-            min_sidebar_width: 240, max_sidebar_width: 480,
+            min_sidebar_width: 180, max_sidebar_width: 480,
         });
         this._sidePx = this._settings.get_int('sidebar-width');
         this._applySidebarWidth();
@@ -949,7 +966,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         });
         gripDrag.connect('drag-update', (g, x) => {
             // no GLib.clamp in this GLib — plain Math
-            this._sidePx = Math.min(480, Math.max(240,
+            this._sidePx = Math.min(480, Math.max(180,
                                        Math.round(this._gripStart + x)));
             this._applySidebarWidth();
         });

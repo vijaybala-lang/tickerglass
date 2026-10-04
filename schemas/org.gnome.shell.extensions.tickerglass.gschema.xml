@@ -162,8 +162,8 @@
     </key>
     <key name="sidebar-width" type="i">
       <default>280</default>
-      <range min="240" max="480"/>
-      <summary>Sidebar width in pixels (drag the divider; 240-480)</summary>
+      <range min="180" max="480"/>
+      <summary>Sidebar width in pixels (drag the divider; 180-480)</summary>
     </key>
   </schema>
 </schemalist>
