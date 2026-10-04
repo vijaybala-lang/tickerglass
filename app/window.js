@@ -845,6 +845,17 @@ class TickerWindow extends Adw.ApplicationWindow {
             if (p === 'chart' || p === 'table' || p === 'movers')
                 this._viewAction?.set_state(new GLib.Variant('s', p));
             this._updateNavChips();
+            // The watchlist lives IN the sidebar, so Movers — a
+            // dashboard that wants every column it can get — collapses
+            // it on entry and restores the user's watchlist preference
+            // on the way back. A manual Alt+S stays honored for as
+            // long as you stay on the page; only toggles outside
+            // Movers rewrite the remembered preference.
+            if (p === 'movers')
+                this._split.set_show_sidebar(false);
+            else if (p === 'chart' || p === 'table')
+                this._split.set_show_sidebar(
+                    this._settings.get_boolean('sidebar-visible'));
             // the reader owns the whole pane: swap the ticker chrome out
             const reading = p === 'reader';
             for (const w of [sideBtn, menuBtn, search, navBox])
@@ -1077,6 +1088,14 @@ class TickerWindow extends Adw.ApplicationWindow {
         content._onSnapshot = () => this._applySidebarWidth();
         sideBtn.bind_property('active', this._split, 'show_sidebar',
                               GObject.BindingFlags.BIDIRECTIONAL);
+        // The preference tracks watchlist-page state only: Movers'
+        // auto-collapse (and any manual override there) is transient
+        // and must never overwrite what the user wants on Chart/Table.
+        this._split.connect('notify::show-sidebar', sp => {
+            if (this._stack?.get_visible_child_name() !== 'movers')
+                this._settings.set_boolean('sidebar-visible',
+                                           sp.get_show_sidebar());
+        });
         this._split.set_content(this._toastOverlay(content));
 
         return this._split;
@@ -3501,8 +3520,12 @@ class TickerWindow extends Adw.ApplicationWindow {
             GLib.source_remove(this._timer);
         if (this._morphId)
             GLib.source_remove(this._morphId);
-        this._settings.set_boolean('sidebar-visible',
-                                   this._split.get_show_sidebar());
+        // persist the WATCHLIST preference, not Movers' transient
+        // collapse (the notify handler keeps the setting in sync for
+        // every non-movers state anyway)
+        if (this._stack?.get_visible_child_name() !== 'movers')
+            this._settings.set_boolean('sidebar-visible',
+                                       this._split.get_show_sidebar());
         return false;
     }
 }
