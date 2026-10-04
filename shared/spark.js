@@ -176,6 +176,7 @@ export function paintChart(cr, opts) {
         showY = true, showX = true, dark = true,
         progress = 1, cursor = null, accent = null,
         compare = null,           // normalized 2nd series: {points:[{t,c}]}
+        cursorFmt = null,         // i => tooltip text (default: price · date)
     } = opts;
 
     const n = points?.length ?? 0;
@@ -349,7 +350,17 @@ export function paintChart(cr, opts) {
         cr.arc(x, y, 2.2, 0, 2 * Math.PI);
         cr.setSourceRGBA(rgb[0], rgb[1], rgb[2], 1);
         cr.fill();
-        const txt = `${fmtY(p.c)}   ${fmtX(p.t)}`;
+        // the benchmark gets its own dot at the same instant (its bars
+        // may differ in count from the primary, so index independently)
+        if (cmp) {
+            const j = Math.max(0, Math.min(cmp.length - 1,
+                Math.round((x - GUT_L) / cw * (cmp.length - 1))));
+            cr.arc(x, Y(cmp[j].c), 2.6, 0, 2 * Math.PI);
+            cr.setSourceRGBA(0.384, 0.627, 0.918, 1);
+            cr.fill();
+        }
+        const txt = cursorFmt ? cursorFmt(i)
+                              : `${fmtY(p.c)}   ${fmtX(p.t)}`;
         const tw = drawText(cr, txt, 0, 0, {size: 9, rgba: [1, 1, 1, 1],
                                             anchor: 'start', vcenter: 1e6});
         const bxp = Math.max(6, Math.min(w - GUT_R - tw - 16, x - (tw + 16) / 2));

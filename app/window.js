@@ -2494,6 +2494,23 @@ class TickerWindow extends Adw.ApplicationWindow {
             const p0 = hist.points[0].c, c0 = cp[0].c;
             cmp = {points: cp.map(p => ({t: p.t, c: p0 * (p.c / c0)}))};
         }
+        const xlab = t => intraday
+            ? fmtTime(t, hist.meta.tz)
+            : axisDate(t, (hist.points[hist.points.length - 1].t -
+                           hist.points[0].t) / 86400);
+        // hover bubble: both tickers' REAL prices at the hovered instant
+        // (the overlay is normalized, the numbers are not)
+        const cmpSym = this._settings.get_string('compare-symbol');
+        const cursorFmt = (cmp && cmpSym) ? i => {
+            const n0 = hist.points.length - 1;
+            const p = hist.points[Math.max(0, Math.min(n0, i))];
+            const j = Math.round(i / n0 * (cp.length - 1));
+            const c = cp[Math.max(0, Math.min(cp.length - 1, j))];
+            return `${symbolShort(this._hero())} ` +
+                `${fmtPrice(p.c, hist.meta.currency)}  ·  ` +
+                `${symbolShort(cmpSym)} ` +
+                `${fmtPrice(c.c, hist.meta.currency)}  ·  ${xlab(p.t)}`;
+        } : null;
         paintChart(cr, {
             w, h,
             points: hist.points,
@@ -2501,11 +2518,11 @@ class TickerWindow extends Adw.ApplicationWindow {
             prevClose: hist.range === '1d' ? hist.meta.prevClose : null,
             dark: this._styleManager?.get_dark() ?? true,
             fmtY: v => fmtPrice(v, hist.meta.currency),
-            fmtX: t => intraday ? fmtTime(t, hist.meta.tz)
-                                : axisDate(t, (hist.points[hist.points.length - 1].t - hist.points[0].t) / 86400),
+            fmtX: xlab,
             progress: this._progress,
             cursor: this._cursor,
             compare: cmp,
+            cursorFmt,
         });
     }
 
