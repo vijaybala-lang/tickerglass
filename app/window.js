@@ -1388,7 +1388,7 @@ class TickerWindow extends Adw.ApplicationWindow {
             const box = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
                                      spacing: 8, margin_start: 10,
                                      margin_end: 10, margin_top: 5,
-                                     margin_bottom: 5});
+                                     margin_bottom: 2});
             // NO ellipsize here, deliberately: GTK auto-marks ellipsized
             // labels selectable when truncation happens during layout —
             // after any explicit set_selectable(false) — and a selectable
@@ -1398,25 +1398,23 @@ class TickerWindow extends Adw.ApplicationWindow {
             symL.add_css_class('tg-row-sym');
             symL.set_max_width_chars(10);
             symL.set_selectable(false);
-            // company name under the symbol, one notch smaller.
-            // Ellipsized for long names — but can_target(false): GTK
-            // auto-marks ellipsized labels selectable at layout, and
-            // a selectable label's text DragSource hijacks the row
-            // reorder drag (the historical symL bug). Dead to the
-            // pointer, the ellipsis is safe.
+            // company name rides BELOW the whole top line (symbol +
+            // sparkline + price), so the sparkline keeps an identical
+            // baseline in every row. Ellipsized for long names — but
+            // can_target(false): GTK auto-marks ellipsized labels
+            // selectable at layout, and a selectable label's text
+            // DragSource hijacks the row reorder drag (the historical
+            // symL bug). Dead to the pointer, the ellipsis is safe.
             const nameL = new Gtk.Label({label: '', xalign: 0,
                                          ellipsize: 3,
-                                         max_width_chars: 14,
+                                         max_width_chars: 22,
                                          css_classes: ['dim-label'],
-                                         can_target: false});
+                                         can_target: false,
+                                         halign: Gtk.Align.START,
+                                         margin_start: 10,
+                                         margin_bottom: 5});
             nameL.add_css_class('tg-row-name');
-            const symCol = new Gtk.Box({
-                orientation: Gtk.Orientation.VERTICAL, spacing: 0,
-                valign: Gtk.Align.CENTER});
-            symCol.append(symL);
-            symCol.append(nameL);
             row._nameL = nameL;
-            box.append(symCol);
             const spark = new Gtk.DrawingArea({content_width: 56,
                                                content_height: 22});
             spark.set_hexpand(true);
@@ -1483,7 +1481,12 @@ class TickerWindow extends Adw.ApplicationWindow {
             } catch (e) { /* ditto */ }
         });
         row.add_controller(hov);
-            row.set_child(box);
+            // two-line row: [sym | spark | price] on top, name under
+            const rowWrap = new Gtk.Box({
+                orientation: Gtk.Orientation.VERTICAL, spacing: 0});
+            rowWrap.append(box);
+            rowWrap.append(nameL);
+            row.set_child(rowWrap);
             row._priceL = priceL;
             row._pctL = pctL;
             row._pctBox = pctBox;
