@@ -32,7 +32,10 @@ window { font-family: Inter, Cantarell, sans-serif; }
                  letter-spacing: -0.025em; }
 /* ticker identity leads the page at 40px (user spec); the symbol badge
  * rides directly underneath */
-.tg-hero-name { font-size: 40px; font-weight: 700;
+/* the app's page-title voice: 40px/-0.02em. The hero ticker name is
+ * the prototype; sibling pages (Movers) wear the same size so page
+ * transitions read as one app, not two */
+.tg-hero-name, .tg-page-title { font-size: 40px; font-weight: 700;
                 letter-spacing: -0.02em; }
 .tg-hero-price.tg-up   { color: @success-color; }
 .tg-hero-price.tg-down { color: @error-color; }

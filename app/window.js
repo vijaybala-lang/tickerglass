@@ -678,9 +678,10 @@ class TickerWindow extends Adw.ApplicationWindow {
                                      margin_top: 8, spacing: 2});
         const movHeadRow = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
                                         spacing: 8});
-        // page title names the window the ranking actually used
+        // page title names the window the ranking actually used — and
+        // speaks in the hero name's voice (40px, .tg-page-title)
         this._movTitle = new Gtk.Label({label: '', xalign: 0,
-                                        css_classes: ['title-3'],
+                                        css_classes: ['tg-page-title'],
                                         // 10 grid margin + 14 card padding
                                         // = aligned with tile text
                                         margin_start: 24,
