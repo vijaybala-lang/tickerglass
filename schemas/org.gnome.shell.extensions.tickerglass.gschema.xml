@@ -111,7 +111,7 @@
         primary's first point (e.g. QQQ). Empty means no comparison.</description>
     </key>
     <key name="spark-range" type="s">
-      <default>'1mo'</default>
+      <default>'5d'</default>
       <choices>
         <choice value='1d'/>
         <choice value='5d'/>

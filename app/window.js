@@ -2059,9 +2059,11 @@ class TickerWindow extends Adw.ApplicationWindow {
                                       hexpand: true});
             b.set_halign(Gtk.Align.FILL);
             const row = new Gtk.Box({spacing: 10});
-            const im = new Gtk.Image({icon_name: icon});
-            im.set_pixel_size(16);
-            row.append(im);
+            if (icon) {
+                const im = new Gtk.Image({icon_name: icon});
+                im.set_pixel_size(16);
+                row.append(im);
+            }
             const lb = new Gtk.Label({label});
             lb.set_xalign(0);
             lb.set_hexpand(true);
@@ -2085,6 +2087,24 @@ class TickerWindow extends Adw.ApplicationWindow {
         // the MODE, spelled out as its own item with a live checkmark
         item('edit-delete-symbolic', 'Remove tickers',
             () => this._setEditMode(!this._editMode), this._editMode);
+        // — sparkline window, its own section: the sidebar rows'
+        // sparklines re-shape the moment the key lands (existing
+        // watcher re-kicks the quote round). No 7d in the spark
+        // dialect — 5d IS the trading week (~7 calendar days).
+        box.append(new Gtk.Separator({margin_top: 4, margin_bottom: 4}));
+        box.append(new Gtk.Label({label: 'Sparkline window',
+                                  css_classes: ['caption', 'dim-label'],
+                                  xalign: 0, margin_start: 4,
+                                  halign: Gtk.Align.START}));
+        const cur = this._settings.get_string('spark-range');
+        const sparkSec = (id, label) => item(null, label,
+            () => this._sparkAction?.set_state(
+                new GLib.Variant('s', id)),
+            cur === id);
+        sparkSec('1d', '1 day');
+        sparkSec('5d', '5 days');
+        sparkSec('1mo', '1 month');
+        sparkSec('6mo', '6 months');
         this._wlMenu.set_child(box);
     }
 
