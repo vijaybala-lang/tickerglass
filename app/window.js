@@ -699,7 +699,8 @@ class TickerWindow extends Adw.ApplicationWindow {
         }
         // sparkline window for the tiles + the table's spark column
         this._mvSparkBtn = new Gtk.MenuButton({label: 'Spark 1M',
-            tooltip_text: 'Sparkline window (drives tiles and table)'});
+            tooltip_text: 'Sparkline window — chart shape only; movers are '
+                        + 'always ranked by today\u2019s move'});
         this._mvSparkBtn.add_css_class('flat');
         {
             const m = new Gio.Menu();
@@ -2161,11 +2162,12 @@ class TickerWindow extends Adw.ApplicationWindow {
             if (!mv || (age > 120 && !this._mvBusy &&
                         this._stack?.get_visible_child_name() === 'movers'))
                 this._loadMarketMovers();
-            this._movHeads.gain.set_text('Market gainers');
-            this._movHeads.lose.set_text('Market losers');
+            this._movHeads.gain.set_text("Today's gainers");
+            this._movHeads.lose.set_text("Today's losers");
             this._movSummary.set_text(
                 mv?.gainers?.length
-                    ? `US equities, all exchanges · screened ${mv.at}`
+                    ? `US equities, all exchanges · ranked by today's ` +
+                      `move · screened ${mv.at}`
                     : mv ? 'Screener unreachable — try the Yahoo data source'
                          : 'Fetching market movers…');
             this._fillMovers('gain',
