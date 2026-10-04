@@ -905,9 +905,12 @@ class TickerWindow extends Adw.ApplicationWindow {
         listBtns.append(newBtn);
         this._wlMenu = new Gtk.Popover({autohide: true});
         this._wlMenu.connect('show', () => this._populateWlMenu());
+        // three-dash hamburger: the button CONTAINS choices (rename,
+        // remove-tickers), and a disclosure glyph promises precisely
+        // that — the pencil promised “edit”, then revealed a menu
         const editBtn = new Gtk.MenuButton({
-            icon_name: 'document-edit-symbolic',
-            tooltip_text: 'Rename watchlist · remove tickers',
+            icon_name: 'open-menu-symbolic',
+            tooltip_text: 'Watchlist actions · rename, remove tickers',
             popover: this._wlMenu,
         });
         this._manageBtn = editBtn;
@@ -1880,7 +1883,15 @@ class TickerWindow extends Adw.ApplicationWindow {
      * mode is the topmost thing to dismiss. */
     _installEscLeavesEdit() {
         const kc = new Gtk.EventControllerKey();
+        // CAPTURE, not the default NONE: the key must be judged
+        // before the focused widget (search entry, menu button…)
+        // gets its own crack at Escape — at bubble phase this
+        // controller never fired at all
+        kc.set_propagation_phase(Gtk.PropagationPhase.CAPTURE);
         kc.connect('key-pressed', (c, keyval) => {
+            if (GLib.getenv('TG_ESC'))
+                log(`ESCEVT key=${keyval} esc=${Gdk.KEY_Escape} ` +
+                    `mode=${this._editMode}`);
             if (keyval === Gdk.KEY_Escape && this._editMode) {
                 this._setEditMode(false);
                 return true;   // consumed
