@@ -698,22 +698,28 @@ class TickerWindow extends Adw.ApplicationWindow {
                                         margin_bottom: 2});
             movCol.append(head);
             this._movHeads[key] = head;
-            const list = new Gtk.ListBox({css_classes: ['tg-news-list']});
-            list.add_css_class('flat');
-            list.set_selection_mode(Gtk.SelectionMode.NONE);
-            const empty = new Gtk.Label({label: '', css_classes: ['dim-label'],
-                                         margin_top: 8, margin_bottom: 8});
-            empty.set_visible(false);
-            list.set_placeholder(empty);
-            this._movEmpties[key] = empty;
-            list.connect('row-activated', (l, row) => {
-                if (!row?._sym)
+            // responsive tile grid: wraps by width, no scrolling tricks
+            const fb = new Gtk.FlowBox({
+                selection_mode: Gtk.SelectionMode.NONE,
+                homogeneous: true, column_spacing: 10, row_spacing: 10,
+                margin_start: 10, margin_end: 10, margin_top: 4,
+                css_classes: ['tg-tilegrid'],
+            });
+            fb.connect('child-activated', (box, child) => {
+                const sym = child.get_child()?._sym;
+                if (!sym)
                     return;
-                this._selectSymbol(row._sym);
+                this._selectSymbol(sym);
                 this._stack.set_visible_child_name('chart');
             });
-            movCol.append(list);
-            this._movLists[key] = list;
+            movCol.append(fb);
+            this._movLists[key] = fb;
+            const empty = new Gtk.Label({label: '', css_classes: ['dim-label'],
+                                         margin_start: 14,
+                                         margin_top: 8, margin_bottom: 8});
+            empty.set_visible(false);
+            movCol.append(empty);
+            this._movEmpties[key] = empty;
         }
         const moversPage = movWrap;
 
@@ -2119,61 +2125,65 @@ class TickerWindow extends Adw.ApplicationWindow {
     }
 
     _fillMovers(key, quotes, emptyText) {
-        const list = this._movLists[key];
-        let c = list.get_last_child();
+        const fb = this._movLists[key];
+        let c = fb.get_last_child();
         while (c !== null) {
-            list.remove(c);
-            c = list.get_last_child();
+            fb.remove(c);
+            c = fb.get_last_child();
         }
-        for (const q of quotes.slice(0, 8))
-            list.append(this._moversRow(q));
+        for (const q of quotes.slice(0, 12))
+            fb.insert(this._moversTile(q), -1);
         const ph = this._movEmpties[key];
         ph.set_text(emptyText);
         ph.set_visible(!quotes.length && !!emptyText);
     }
 
-    _moversRow(q) {
-        const row = new Gtk.ListBoxRow();
-        row._sym = q.symbol;
-        const line = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
-                                  spacing: 10, margin_start: 12,
-                                  margin_end: 12, margin_top: 8,
-                                  margin_bottom: 8});
-        const symL = new Gtk.Label({label: q.symbol, xalign: 0});
+    /* one dashboard tile: symbol + pct up top, name, price, and the
+     * day's shape across the full tile width */
+    _moversTile(q) {
+        const t = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL,
+                               spacing: 6, css_classes: ['tg-tile']});
+        t._sym = q.symbol;
+        const head = new Gtk.Box({spacing: 8});
+        const symL = new Gtk.Label({label: q.symbol});
         symL.add_css_class('tg-row-sym');
-        line.append(symL);
+        head.append(symL);
+        const spacer = new Gtk.Box();
+        spacer.set_hexpand(true);
+        head.append(spacer);
+        const pill = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
+                                  spacing: 4});
+        pill.add_css_class(q.changePct >= 0 ? 'tg-up' : 'tg-down');
+        const tri = this._makeTri(10);
+        tri._up = q.changePct >= 0;
+        pill.append(tri);
+        const pctL = new Gtk.Label({label: fmtPct(q.changePct),
+                                    css_classes: ['numeric']});
+        pctL.add_css_class('heading');
+        pill.append(pctL);
+        head.append(pill);
+        t.append(head);
         const nameL = new Gtk.Label({label: q.name || q.symbol, xalign: 0,
-                                     ellipsize: 3, hexpand: true,
-                                     max_width_chars: 26,
-                                     css_classes: ['dim-label']});
-        line.append(nameL);
+                                     ellipsize: 3, max_width_chars: 18,
+                                     css_classes: ['dim-label', 'caption']});
+        t.append(nameL);
+        const priceL = new Gtk.Label({label: fmtPrice(q.price, q.currency),
+                                      xalign: 0,
+                                      css_classes: ['numeric', 'title-3']});
+        t.append(priceL);
         if (q.spark?.length > 1) {
-            const sp = new Gtk.DrawingArea({content_width: 56,
-                                            content_height: 22,
-                                            valign: Gtk.Align.CENTER});
+            const sp = new Gtk.DrawingArea({content_width: 150,
+                                            content_height: 34,
+                                            hexpand: true,
+                                            valign: Gtk.Align.END});
             const up = (q.change ?? 0) >= 0;
             const vals = q.spark;
             sp.set_draw_func((a, cr, w, h) =>
                 paintMiniSpark(cr, {w, h, values: vals, up}));
-            line.append(sp);
+            t.append(sp);
         }
-        const priceL = new Gtk.Label({label: fmtPrice(q.price, q.currency),
-                                      css_classes: ['numeric']});
-        line.append(priceL);
-        // the one triangle+pill idiom, compact size, like every other
-        // up/down read in the app
-        const pill = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
-                                  spacing: 5, valign: Gtk.Align.CENTER,
-                                  css_classes: ['tg-pill']});
-        pill.add_css_class(q.changePct >= 0 ? 'tg-up' : 'tg-down');
-        const tri = this._makeTri(11);
-        tri._up = q.changePct >= 0;
-        pill.append(tri);
-        pill.append(new Gtk.Label({label: fmtPct(q.changePct),
-                                   css_classes: ['numeric']}));
-        line.append(pill);
-        row.set_child(line);
-        return row;
+        t.set_size_request(178, -1);
+        return t;
     }
 
     /* ── data flow ────────────────────────────────────────────────────── */

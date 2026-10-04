@@ -237,6 +237,19 @@ list row { border-radius: 12px; }
 }
 .tg-news-list row:hover { background: alpha(currentcolor, 0.08); }
 
+/* movers tiles: FlowBox children stay transparent, the card lives on
+ * the tile itself so hover/rounding reads as one object */
+.tg-tilegrid > flowchild { background: none; border: none; padding: 0; }
+.tg-tile {
+  background: alpha(currentcolor, 0.04);
+  border-radius: 14px;
+  padding: 12px 14px 10px 14px;
+}
+.tg-tilegrid > flowchild:hover .tg-tile,
+.tg-tilegrid > flowchild:selected .tg-tile {
+  background: alpha(currentcolor, 0.08);
+}
+
 /* dialogs */
 .dlg-pad { padding: 18px; }
 
