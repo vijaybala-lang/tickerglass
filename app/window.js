@@ -908,12 +908,61 @@ class TickerWindow extends Adw.ApplicationWindow {
             symScroll.set_child(symOv);
         }
         sideBox.append(symScroll);
-        sidebar.set_child(sideBox);
+        /* resize grip: a thin strip riding the sidebar's right edge.
+         * OverlaySplitView sizes the sidebar from a WIDTH FACTOR, so
+         * the drag converts pixels -> factor over the live split
+         * width; pixels are what the user perceives and what we
+         * persist, and the factor is recomputed on every window
+         * resize so the sidebar keeps its pixel width */
+        const sideWrap = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL});
+        sideBox.set_hexpand(true);
+        sideWrap.append(sideBox);
+        const grip = new Gtk.Box({css_classes: ['tg-sidegrip']});
+        grip.set_size_request(7, -1);
+        sideWrap.append(grip);
+        sidebar.set_child(sideWrap);
 
         this._split = new Adw.OverlaySplitView({
             sidebar: sidebar, show_sidebar: this._settings.get_boolean('sidebar-visible'),
-            min_sidebar_width: 240, max_sidebar_width: 360,
+            min_sidebar_width: 240, max_sidebar_width: 480,
         });
+        this._sidePx = this._settings.get_int('sidebar-width');
+        this._applySidebarWidth();
+        const gripDrag = new Gtk.GestureDrag();
+        gripDrag.set_button(1);
+        gripDrag.connect('drag-begin', () => {
+            this._gripStart = this._sidePx;
+        });
+        gripDrag.connect('drag-update', (g, x) => {
+            // no GLib.clamp in this GLib — plain Math
+            this._sidePx = Math.min(480, Math.max(240,
+                                       Math.round(this._gripStart + x)));
+            this._applySidebarWidth();
+        });
+        gripDrag.connect('drag-end', () =>
+            this._settings.set_int('sidebar-width', this._sidePx));
+        grip.add_controller(gripDrag);
+        // GTK CSS has no `cursor`; the col-resize pointer lives on the
+        // widget so it appears on hover over the 7px strip
+        grip.connect('realize', w => {
+            // GJS constructor form is new_from_name(name, flags) — the
+            // display is implicit (the default one, which is ours)
+            w.set_cursor(Gdk.Cursor.new_from_name('col-resize', null));
+        });
+        // double-click the divider: back to the default width
+        const gripTap = new Gtk.GestureClick();
+        gripTap.set_button(1);
+        gripTap.connect('pressed', (g, nPress) => {
+            if (nPress !== 2)
+                return;
+            this._settings.set_int('sidebar-width', 280);
+        });
+        grip.add_controller(gripTap);
+        grip.set_tooltip_text('Drag to resize · double-click to reset');
+        // pixels -> factor needs the live split width; re-apply on
+        // every allocation change (notify::width still fires on 4.22)
+        this._split.connect('notify::width', () =>
+            this._applySidebarWidth());
         sideBtn.bind_property('active', this._split, 'show_sidebar',
                               GObject.BindingFlags.BIDIRECTIONAL);
         this._split.set_content(this._toastOverlay(content));
@@ -3295,7 +3344,20 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._split.set_show_sidebar(
                 this._settings.get_boolean('sidebar-visible'));
             break;
+        case 'sidebar-width':
+            this._sidePx = this._settings.get_int('sidebar-width');
+            this._applySidebarWidth();
+            break;
         }
+    }
+
+    /* pixels are the promise; OverlaySplitView takes a fraction, so
+     * translate against the live split width (re-done on every resize) */
+    _applySidebarWidth() {
+        const total = this._split?.get_width() ?? 0;
+        if (total < 1)          // not allocated yet; notify::width will
+            return;             // replay this once it is
+        this._split.sidebar_width_factor = this._sidePx / total;
     }
 
     _restartTimer() {

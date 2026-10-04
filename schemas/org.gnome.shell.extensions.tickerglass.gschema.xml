@@ -160,5 +160,10 @@
       <default>true</default>
       <summary>Watchlist sidebar visibility (app)</summary>
     </key>
+    <key name="sidebar-width" type="i">
+      <default>280</default>
+      <range min="240" max="480"/>
+      <summary>Sidebar width in pixels (drag the divider; 240-480)</summary>
+    </key>
   </schema>
 </schemalist>

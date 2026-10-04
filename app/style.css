@@ -298,3 +298,11 @@ list row { border-radius: 12px; }
 /* sidebar watchlist rows + news list */
 .tg-row-sym { font-weight: 700; }
 .tg-news-title { font-weight: 600; }
+
+/* resize divider between sidebar and content: a hairline that only
+ * announces itself on approach (7px hit strip; col-resize cursor is
+ * set on the widget — GTK CSS has no `cursor` property) */
+.tg-sidegrip {
+  background: alpha(currentcolor, 0.08);
+}
+.tg-sidegrip:hover { background: alpha(@accent_bg_color, 0.55); }
