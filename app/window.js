@@ -153,6 +153,20 @@ export class QuoteItem {
     }
 }
 
+/* content-area box that whispers every snapshot. GtkWidget::snapshot
+ * is a vfunc (no signal), and it is the ONLY post-allocation callback
+ * that survives in GTK 4.22: notify::width never fires, map runs
+ * BEFORE the first allocation, resize is gone. Draws imply an
+ * allocation, so this covers boot and every window resize — the
+ * sidebar's px->fraction translation hangs on it */
+const SnapshotBox = GObject.registerClass(
+class SnapshotBox extends Gtk.Box {
+    vfunc_snapshot(snapshot) {
+        this._onSnapshot?.();
+        super.vfunc_snapshot(snapshot);
+    }
+});
+
 /* ── column registry ────────────────────────────────────────────────────── */
 const COLS = [
     {key: 'symbol',  title: 'Symbol',  prop: 'sym',      numeric: false},
@@ -382,7 +396,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         hbar.pack_end(this._readExt);
 
         /* —— content column —— */
-        const content = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL});
+        const content = new SnapshotBox({orientation: Gtk.Orientation.VERTICAL});
         content.append(hbar);
 
         // the window body stacks Chart (hero + chart + news), Table (the
@@ -959,10 +973,13 @@ class TickerWindow extends Adw.ApplicationWindow {
         });
         grip.add_controller(gripTap);
         grip.set_tooltip_text('Drag to resize · double-click to reset');
-        // pixels -> factor needs the live split width; re-apply on
-        // every allocation change (notify::width still fires on 4.22)
-        this._split.connect('notify::width', () =>
-            this._applySidebarWidth());
+        // pixels -> factor needs the live split width. notify::width
+        // and map are useless (map fires BEFORE the first allocation,
+        // and the width notifies never fire on 4.22), so apply from
+        // the content's snapshot: a draw can only happen after
+        // allocation, so it covers boot AND every window resize. The
+        // unchanged-guard inside keeps it free on subsequent frames
+        content._onSnapshot = () => this._applySidebarWidth();
         sideBtn.bind_property('active', this._split, 'show_sidebar',
                               GObject.BindingFlags.BIDIRECTIONAL);
         this._split.set_content(this._toastOverlay(content));
@@ -3352,12 +3369,23 @@ class TickerWindow extends Adw.ApplicationWindow {
     }
 
     /* pixels are the promise; OverlaySplitView takes a fraction, so
-     * translate against the live split width (re-done on every resize) */
+     * translate against the live split width — re-applied from the
+     * content snapshot (a draw is always post-allocation, so that
+     * single hook covers boot AND every window resize). set_property
+     * rather than the dotted form so a wrong property name THROWS:
+     * GJS expands unknown "properties" into silent no-op JS fields.
+     * Verified live: sidebar-width-FRACTION is real; the newer
+     * sidebar-width-unit does not alter the math. */
     _applySidebarWidth() {
         const total = this._split?.get_width() ?? 0;
-        if (total < 1)          // not allocated yet; notify::width will
-            return;             // replay this once it is
-        this._split.sidebar_width_factor = this._sidePx / total;
+        if (total < 1)                        // not allocated yet
+            return;
+        const target = this._sidePx / total;
+        // (no get_property from GJS — shadow the last value we wrote)
+        if (Math.abs(target - (this._frac ?? -1)) < 0.002)
+            return;                           // steady state (~1px)
+        this._frac = target;
+        this._split.set_property('sidebar-width-fraction', target);
     }
 
     _restartTimer() {
