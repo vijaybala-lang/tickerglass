@@ -110,11 +110,14 @@ window { font-family: Inter, Cantarell, sans-serif; }
 .tg-tab label { font-size: 0.9em; font-weight: 600; }
 .tg-tab-active,
 .tg-tab-active:hover {
-  color: @accent_color;
+  /* GNOME blue, hardcoded like the drop bar — @accent_color would
+   * be this app's brand green */
+  color: #3584e4;
   background-image: none;
   /* soft neutral gray, not the accent wash — reads as a lit
    * segment in both themes (light: faint gray pill; night: mild
-   * luminance lift), leaving green ink as the sole accent signal */
+   * luminance lift), leaving the blue ink as the sole accent
+   * signal */
   background-color: alpha(#9a9a9a, 0.28);
 }
 
