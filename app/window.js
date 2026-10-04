@@ -1909,13 +1909,43 @@ class TickerWindow extends Adw.ApplicationWindow {
     }
 
     _deleteList(id) {
-        const lists = this._lists().filter(w => w.id !== id);
-        if (!lists.length)
+        const all = this._lists();
+        const wl = all.find(w => w.id === id);
+        if (!wl)
             return;
-        this._writeLists(lists);
-        if (this._settings.get_string('active-watchlist') === id)
-            this._settings.set_string('active-watchlist', lists[0].id);
-        this._toast('List deleted');
+        if (all.length < 2) {
+            this._toast('Keep at least one list');
+            return;
+        }
+        // native confirm: the old click-to-annihilate-a-watchlist was
+        // one fat finger from losing a curated list (rows swipe-delete
+        // behind a reveal gesture — the list itself had no gate at all)
+        const n = wl.symbols.length;
+        const alert = new Adw.AlertDialog({
+            heading: `Delete “${wl.name}”?`,
+            body: n === 1
+                ? 'Its 1 ticker will be gone. This cannot be undone.'
+                : `Its ${n} tickers will be gone. This cannot be undone.`,
+            close_response: 'cancel',
+        });
+        alert.add_response('cancel', 'Cancel');
+        alert.set_response_appearance('cancel',
+            Adw.ResponseAppearance.DEFAULT);
+        alert.add_response('delete', 'Delete');
+        alert.set_response_appearance('delete',
+            Adw.ResponseAppearance.DESTRUCTIVE);
+        alert.set_default_response('cancel');
+        alert.connect('response', (a, r) => {
+            if (r !== 'delete')
+                return;
+            const lists = all.filter(w => w.id !== id);
+            this._writeLists(lists);
+            if (this._settings.get_string('active-watchlist') === id)
+                this._settings.set_string('active-watchlist',
+                    lists[0].id);
+            this._toast('List deleted');
+        });
+        alert.present(this);
     }
 
     /* commit a previewed symbol to a specific list (split-button menu) */
