@@ -333,6 +333,29 @@ export function paintChart(cr, opts) {
         drawText(cr, label, bx + pw / 2, 0, {
             size: 9, bold: true, rgba: [1, 1, 1, 1], vcenter: y,
         });
+        /* the benchmark anchors its own ending value below/above it:
+         * blue fill, dark ink (blue-2 is too light for white), and a
+         * nudge when the two pills would stack on top of each other */
+        if (cmp?.length >= 2 && compare?.endLabel) {
+            const cy0 = Math.min(Math.max(Y(cmp.at(-1).c), GUT_T + 9),
+                                 h - GUT_B - 9);
+            const cy = Math.min(Math.max(
+                Math.abs(cy0 - y) < 17 ? (cy0 > y ? y + 17 : y - 17) : cy0,
+                GUT_T + 9), h - GUT_B - 9);
+            const el = String(compare.endLabel);
+            const etw = drawText(cr, el, 0, 0, {
+                size: 9, bold: true, rgba: [1, 1, 1, 1], anchor: 'start',
+                vcenter: 1e6,
+            });
+            const epw = Math.min(GUT_R - 8, etw + 10);
+            roundRect(cr, bx, cy - 8, epw, 16, 5);
+            cr.setSourceRGBA(0.384, 0.627, 0.918, 0.95);
+            cr.fill();
+            drawText(cr, el, bx + epw / 2, 0, {
+                size: 9, bold: true, rgba: [0.1, 0.11, 0.13, 0.95],
+                vcenter: cy,
+            });
+        }
     }
 
     /* hover crosshair + bubble */

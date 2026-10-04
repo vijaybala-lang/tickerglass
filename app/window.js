@@ -2830,7 +2830,12 @@ class TickerWindow extends Adw.ApplicationWindow {
             ? this._cmpHist.points : null;
         if (cp?.length > 1 && hist.points[0]?.c && cp[0].c) {
             const p0 = hist.points[0].c, c0 = cp[0].c;
-            cmp = {points: cp.map(p => ({t: p.t, c: p0 * (p.c / c0)}))};
+            cmp = {
+                points: cp.map(p => ({t: p.t, c: p0 * (p.c / c0)})),
+                // the gutter pill shows the benchmark's own price, not
+                // the normalized value the line is drawn at
+                endLabel: fmtPrice(cp.at(-1).c, hist.meta.currency),
+            };
         }
         const xlab = t => intraday
             ? fmtTime(t, hist.meta.tz)
