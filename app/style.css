@@ -182,11 +182,14 @@ window { font-family: Inter, Cantarell, sans-serif; }
   min-width: 1px;
   margin: 3px 0;
 }
-/* Manage pill while Remove-tickers mode is ON: an inset ring reads
- * as pressed over the gradient skin (the mode's checkmark lives in
- * the menu; this is the at-a-glance cue) */
+/* Manage pill while Remove-tickers mode is ON. Mimics libadwaita's
+ * :checked button — a soft alpha wash of the foreground ink that
+ * adapts light/dark automatically (the old 2px 55%-black ring read
+ * heavy and dark). MenuButton.active is reserved for popover-open
+ * state, so the mode wears the look manually. */
 .tg-manage-on {
-  box-shadow: inset 0 0 0 2px alpha(#000000, 0.55);
+  background-color: alpha(@window_fg_color, 0.13);
+  box-shadow: inset 0 0 0 1px alpha(@window_fg_color, 0.28);
 }
 /* inline search results (header popover rows) */
 .tg-search-pop { padding: 7px 10px; border-radius: 8px; }
