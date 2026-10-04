@@ -1626,20 +1626,22 @@ class TickerWindow extends Adw.ApplicationWindow {
                 cr.stroke();                    // white bloom: round corners
                 cr.restore();
             } else if (shape === 'tri') {
-                // rounded triangle with a dark rim drawn BEHIND: stroke
-                // wide first (dark), then fill bright over the inner
-                // half — a centered fat stroke would eat the fill at
-                // small sizes
-                const lw = Math.max(2, size / 9);
-                cr.setLineWidth(lw * 2);
-                const tp = Math.max(2, size / 8);
-                cr.moveTo(ww / 2, tp);
-                cr.lineTo(ww - tp, hh - tp);
-                cr.lineTo(tp, hh - tp);
+                // Flat ROUNDED triangle, one colour, no rim (user
+                // reference: Robinhood's clip-path chip). Stroke +
+                // fill of the SAME path: the round line-join puffs
+                // each of the three corners outward by exactly rad,
+                // so the rounding holds at hero size and at 10px.
+                // (The old design strode a wide dark rim behind the
+                // fill; the reference asks the colour alone to carry
+                // direction.)
+                const rad = Math.max(1.1, size * 0.18);
+                const inset = rad + 0.5;
+                cr.setLineWidth(rad * 2);
+                cr.moveTo(ww / 2, inset);
+                cr.lineTo(ww - inset, hh - inset);
+                cr.lineTo(inset, hh - inset);
                 cr.closePath();
-                cr.setSourceRGBA(r * 0.45, g * 0.45, b * 0.45, a);
                 cr.strokePreserve();
-                cr.setSourceRGBA(r, g, b, a);
                 cr.fill();
                 return;
             } else {
