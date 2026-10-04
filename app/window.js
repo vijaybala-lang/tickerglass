@@ -346,10 +346,8 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._searchEntry = search;
         this._buildSearchPopover(search);
         // page navigation right beside the search: Watchlist ↔ Movers.
-        // Browser-style tabs (.tg-tab): the active one wears the page
-        // background and sits flush with the toolbar seam.
-        const navBox = new Gtk.Box({spacing: 3, valign: Gtk.Align.END,
-                                    margin_bottom: 0, margin_top: 6});
+        // Flat nav-bar buttons (.tg-tab): active page = accent underline.
+        const navBox = new Gtk.Box({spacing: 4, valign: Gtk.Align.CENTER});
         this._navChips = {};
         for (const [key, label, tip, view] of [
                 ['watch', 'Watchlist', 'Your symbols  ( Alt+1 )', 'chart'],

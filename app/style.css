@@ -96,31 +96,29 @@ window { font-family: Inter, Cantarell, sans-serif; }
   border-color: alpha(currentcolor, 0.35);
 }
 
-/* browser-style page tabs (Watchlist | Movers in the header):
- * inactive tabs quiet and borderless, hover raises a soft rounded
- * rect, and the ACTIVE tab wears the page's own background with
- * rounded top corners and a negative bottom margin so it bites
- * into the toolbar seam and reads as the content below rising
- * up into the bar — Chrome/Firefox logic, libadwaita tokens so
- * light and dark both stay correct */
+/* navigation-bar style page buttons (Watchlist | Movers in the
+ * header): flat labels, no chrome at all. Quiet until hovered; the
+ * ACTIVE page gets full-strength text and a slim accent underline —
+ * the nav-bar pattern (Material/adw view switcher), so state lives
+ * in ink + indicator, never in a shape that shifts geometry */
 .tg-tab {
   background: none;
   border: none;
   box-shadow: none;
-  padding: 5px 16px 6px;
-  margin: 0 0 -6px;
+  padding: 4px 12px 6px;
+  margin: 0;
   min-height: 0;
-  border-radius: 12px 12px 0 0;
+  border-radius: 8px;
   font-weight: 600;
-  opacity: 0.78;
+  opacity: 0.72;
 }
-.tg-tab:hover:not(.tg-tab-active) {
+.tg-tab:hover {
   background: alpha(currentcolor, 0.07);
   opacity: 1;
 }
 .tg-tab-active {
-  background: @window_bg_color;
   opacity: 1;
+  box-shadow: inset 0 -2px 0 @accent_bg_color;
 }
 
 /* static stat chips under the hero price */
