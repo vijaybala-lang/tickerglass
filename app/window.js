@@ -992,7 +992,9 @@ class TickerWindow extends Adw.ApplicationWindow {
             // overlay OUTSIDE the scroller (scroller is the overlay's
             // main child): pill / drop-bar / ghost float over the
             // VIEWPORT and hold position while the list scrolls —
-            // nested inside, they rode the content away
+            // nested inside, they rode the content away. (The chain
+            // stays complete: LIST -> scroll -> overlay.)
+            symScroll.set_child(this._symList);
             symOv.set_child(symScroll);
             this._symOv = symOv;
             this._symAdj = symScroll.get_vadjustment();
