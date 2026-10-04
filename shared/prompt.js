@@ -19,16 +19,24 @@ export function textPrompt({parent, title, initial = '',
                              spacing: 10});
     const entry = new Adw.EntryRow({title, text: initial});
     box.append(entry);
-    // Cancel + Accept as an even two-button row: Adw.Dialog honors
-    // Escape via can_close, but a dialog with only a suggested-action
-    // button leaves no visible way OUT — the eye goes to buttons.
+    // Match Adw.AlertDialog's response row (the delete-confirm look):
+    // CENTERED pill buttons with a shared min width, not a full-width
+    // button bar. The content slot that would let us reuse AlertDialog
+    // itself is withheld by this Fedora's typelib (probed), so the
+    // look is replicated: pill is libadwaita-native, min width is set
+    // in code so the shared file needs no stylesheet — the extension
+    // gets the identical dialogs for free.
     const btnRow = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
-                                spacing: 6});
-    const cancel = new Gtk.Button({label: _('Cancel'), hexpand: true});
+                                spacing: 6, halign: Gtk.Align.CENTER});
+    const cancel = new Gtk.Button({label: _('Cancel')});
     cancel.add_css_class('flat');
+    cancel.add_css_class('pill');
+    cancel.set_size_request(120, -1);
     cancel.connect('clicked', () => dlg.force_close());
-    const btn = new Gtk.Button({label: acceptLabel, hexpand: true});
+    const btn = new Gtk.Button({label: acceptLabel});
     btn.add_css_class('suggested-action');
+    btn.add_css_class('pill');
+    btn.set_size_request(120, -1);
     btnRow.append(cancel);
     btnRow.append(btn);
     box.append(btnRow);
