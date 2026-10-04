@@ -890,37 +890,34 @@ class TickerWindow extends Adw.ApplicationWindow {
                                        css_classes: ['heading']});
         sideLbl.set_valign(Gtk.Align.CENTER);
         sideHead.append(sideLbl);
-        // ONE action-bar pill like search's “+ Add to Watchlist”
-        // (same tg-add skin: icon + label + separator + caret), and
-        // every list action is a named, icon-led row inside its menu
-        // — rename and remove-tickers are DISTINCT items, no
-        // overloaded pencil with secret right-click semantics
+        // ALL list-level actions live here as one linked cluster:
+        // new / edit-menu / delete. The edit button opens a small
+        // menu (Rename · Remove tickers) — its one click used to
+        // toggle a mode invisibly; now it reveals labelled choices.
+        const listBtns = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
+                                      css_classes: ['linked'],
+                                      halign: Gtk.Align.END,
+                                      hexpand: true,
+                                      valign: Gtk.Align.CENTER});
+        const newBtn = new Gtk.Button({icon_name: 'list-add-symbolic',
+                                       tooltip_text: 'New list (Ctrl+N)'});
+        newBtn.set_action_name('win.newlist');
+        listBtns.append(newBtn);
         this._wlMenu = new Gtk.Popover({autohide: true});
-        const manageBtn = new Gtk.Button({valign: Gtk.Align.CENTER,
-                                          tooltip_text:
-                                              'Watchlist actions'});
-        {
-            const inner = new Gtk.Box({spacing: 8});
-            const mImg = new Gtk.Image({icon_name: 'view-list-symbolic'});
-            mImg.set_pixel_size(14);
-            inner.append(mImg);
-            inner.append(new Gtk.Label({label: 'Manage'}));
-            const sep = new Gtk.Box({css_classes: ['tg-add-sep']});
-            inner.append(sep);
-            const caretImg = new Gtk.Image(
-                {icon_name: 'pan-down-symbolic'});
-            caretImg.set_pixel_size(14);
-            inner.append(caretImg);
-            manageBtn.set_child(inner);
-        }
-        manageBtn.add_css_class('tg-add');
-        manageBtn.set_focus_on_click(false);
-        manageBtn.set_halign(Gtk.Align.END);
-        this._manageBtn = manageBtn;
-        this._wlMenu.set_parent(manageBtn);
         this._wlMenu.connect('show', () => this._populateWlMenu());
-        manageBtn.connect('clicked', () => this._wlMenu.popup());
-        sideHead.append(manageBtn);
+        const editBtn = new Gtk.MenuButton({
+            icon_name: 'document-edit-symbolic',
+            tooltip_text: 'Rename watchlist · remove tickers',
+            popover: this._wlMenu,
+        });
+        this._manageBtn = editBtn;
+        listBtns.append(editBtn);
+        const delBtn = new Gtk.Button({icon_name: 'user-trash-symbolic',
+                                       tooltip_text: 'Delete current list'});
+        delBtn.connect('clicked', () =>
+            this._deleteList(this._settings.get_string('active-watchlist')));
+        listBtns.append(delBtn);
+        sideHead.append(listBtns);
         sideBox.append(sideHead);
 
         // dropdown picking the active watchlist (the extension follows live)
@@ -2001,11 +1998,10 @@ class TickerWindow extends Adw.ApplicationWindow {
     }
 
     /* rebuild the split-button popover: fresh symbol + list membership */
-    /* sidebar “Manage” pill menu: every watchlist action as its own
-     * icon + text row, so Rename and Remove-tickers are unmistakable
-     * siblings instead of halves of one overloaded pencil. Rebuilt on
-     * open: names, the tickers-mode check, and delete availability
-     * are always current. */
+    /* the edit button's menu: the two actions that button stands for
+     * — rename (a one-shot) and remove-tickers (a MODE, checkmarked
+     * while on). New/Delete have their own buttons in the cluster.
+     * Rebuilt on open so the name and mode check are current. */
     _populateWlMenu() {
         const lists = this._lists();
         const wl = this._activeList(lists);
@@ -2014,7 +2010,7 @@ class TickerWindow extends Adw.ApplicationWindow {
             margin_top: 6, margin_bottom: 6,
             margin_start: 6, margin_end: 6,
         });
-        box.set_size_request(236, -1);
+        box.set_size_request(212, -1);
         const item = (icon, label, fn, checked = null) => {
             const b = new Gtk.Button({css_classes: ['flat'],
                                       hexpand: true});
@@ -2039,14 +2035,9 @@ class TickerWindow extends Adw.ApplicationWindow {
             });
             box.append(b);
         };
-        item('list-add-symbolic', 'New watchlist',
-            () => this._newListDialog());
-        if (wl) {
+        if (wl)
             item('document-edit-symbolic',
                 `Rename “${wl.name || wl.id}”`, () => this._renameList(wl.id));
-            item('user-trash-symbolic',
-                `Delete “${wl.name || wl.id}”`, () => this._deleteList(wl.id));
-        }
         box.append(new Gtk.Separator({margin_top: 4, margin_bottom: 4}));
         // the MODE, spelled out as its own item with a live checkmark
         item('edit-delete-symbolic', 'Remove tickers',
