@@ -238,8 +238,24 @@ list row { border-radius: 12px; }
 .tg-news-list row:hover { background: alpha(currentcolor, 0.08); }
 
 /* movers tiles: FlowBox children stay transparent, the card lives on
- * the tile itself so hover/rounding reads as one object */
-.tg-tilegrid > flowchild { background: none; border: none; padding: 0; }
+ * the tile itself so hover/rounding reads as one object. Every pseudo
+ * state is stripped: libadwaita paints its own hover/focus background
+ * on flowchild, and a half-covered override showed as a lighter halo
+ * around the card */
+.tg-tilegrid > flowchild,
+.tg-tilegrid > flowchild:hover,
+.tg-tilegrid > flowchild:active,
+.tg-tilegrid > flowchild:selected,
+.tg-tilegrid > flowchild:focus,
+.tg-tilegrid > flowchild:focus-within {
+  background: none;
+  background-image: none;
+  border: none;
+  box-shadow: none;
+  outline: none;
+  padding: 0;
+  margin: 0;
+}
 .tg-tile {
   background: alpha(currentcolor, 0.04);
   border-radius: 14px;

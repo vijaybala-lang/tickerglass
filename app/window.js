@@ -2131,8 +2131,15 @@ class TickerWindow extends Adw.ApplicationWindow {
             fb.remove(c);
             c = fb.get_last_child();
         }
-        for (const q of quotes.slice(0, 12))
+        for (const q of quotes.slice(0, 12)) {
             fb.insert(this._moversTile(q), -1);
+            // the card is decoration, not a focus stop — the tile's
+            // click handler is the interaction, and a focused
+            // FlowBoxChild draws a ring no CSS override can hide
+            const fc = fb.get_last_child();
+            if (fc?.set_can_focus)
+                fc.set_can_focus(false);
+        }
         const ph = this._movEmpties[key];
         ph.set_text(emptyText);
         ph.set_visible(!quotes.length && !!emptyText);
