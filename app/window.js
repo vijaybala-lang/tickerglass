@@ -165,6 +165,28 @@ class TickerWindow extends Adw.ApplicationWindow {
                 });
                 return GLib.SOURCE_REMOVE;
             });
+        // TG_ADD: follow the TG_SEARCH pick with a watchlist add and
+        // sample the hero labels over time — objective blank-detection
+        if (search0 && GLib.getenv('TG_ADD'))
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT,
+                             Number(GLib.getenv('TG_ADD')) || 5200,
+                             () => {
+                const hero = () => `${this._heroName.get_label()}|` +
+                    `${this._heroSym.get_label()}|` +
+                    `${this._heroPrice.get_label()}`;
+                log(`TG_ADD before=<<${hero()}>>`);
+                this._addSymbol(this._hero());
+                for (const ms of [50, 300, 1000, 2000, 3500, 5500])
+                    GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => {
+                        if (this._dead)
+                            return GLib.SOURCE_REMOVE;
+                        log(`TG_ADD +${ms}ms hero=<<${hero()}>> ` +
+                            `pq=${!!this._previewQ} ` +
+                            `quotes=${this._quotes.length}`);
+                        return GLib.SOURCE_REMOVE;
+                    });
+                return GLib.SOURCE_REMOVE;
+            });
         // TG_KEYTEST: types through REAL key events (Gtk.Test), which
         // traverses the full input pipeline including window
         // accelerators — set_text() cannot catch swallowed characters
@@ -1412,8 +1434,20 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._toast(`${symbol} added to ${wl.name}`);
         }
         if (this._preview?.sym === symbol) {
+            const p = this._preview;
             this._preview = null;     // real now; the button hides itself
-            this._previewQ = null;
+            // The bridge must exist even when add lands before the
+            // preview's history fetch filled _previewQ (fast clicks):
+            // without it, name/symbol blank for seconds — synthesize a
+            // name-only stand-in; real data supersedes it on arrival.
+            if (this._previewQ?.symbol !== symbol)
+                this._previewQ = {
+                    symbol, name: p.name || symbol,
+                    price: null, prevClose: null, currency: 'USD',
+                    state: '', exchange: p.exchange ?? '',
+                    volume: null, change: null, changePct: null,
+                    spark: null, error: null,
+                };
         }
         const was = this._settings.get_string('selected-symbol');
         this._selectSymbol(symbol);
@@ -1903,6 +1937,12 @@ class TickerWindow extends Adw.ApplicationWindow {
                                   - this._t0).toFixed(1)}s quotes round done`
                           + ` (${res.quotes.length} symbols)`);
                 this._quotes = res.quotes;
+                // same bridge rule after a wholesale replace: if the
+                // previewed symbol's real quote is in the set, retire it
+                if (this._previewQ && res.quotes.some(
+                        x => x.symbol === this._previewQ.symbol
+                             && x.price != null))
+                    this._previewQ = null;
                 this._atWall = Math.floor(GLib.get_real_time() / 1e6);
                 this._busy = false;
                 this._busySince = 0;
@@ -1961,6 +2001,9 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._quotes[i] = q;
         else
             this._quotes.push(q);
+        // the first real quote supersedes the add-bridge preview data
+        if (this._previewQ?.symbol === q.symbol && q.price != null)
+            this._previewQ = null;
         // measured: a full table rebuild costs ~8ms at 11 symbols, and
         // quotes arrive faster than that — rebuild once per burst instead
         // of once per quote (the round-done pass flushes the pending one)
