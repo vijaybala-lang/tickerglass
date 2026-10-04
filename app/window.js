@@ -346,14 +346,20 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._searchEntry = search;
         this._buildSearchPopover(search);
         // page navigation right beside the search: Watchlist ↔ Movers.
-        // Flat nav-bar buttons (.tg-tab): active page = accent underline.
+        // Icon-only nav bar (.tg-tab): stock symbolics (probe-verified
+        // present — chart-line-symbolic does NOT exist on this box),
+        // active page = accent-tinted icon + slim underline. Tooltips
+        // carry the names.
         const navBox = new Gtk.Box({spacing: 4, valign: Gtk.Align.CENTER});
         this._navChips = {};
-        for (const [key, label, tip, view] of [
-                ['watch', 'Watchlist', 'Your symbols  ( Alt+1 )', 'chart'],
-                ['movers', 'Movers', 'Gainers and losers  ( Alt+2 )',
+        for (const [key, icon, tip, view] of [
+                ['watch', 'starred-symbolic',
+                 'Watchlist — your symbols  ( Alt+1 )', 'chart'],
+                ['movers', 'go-up-symbolic',
+                 'Top movers — gainers & losers  ( Alt+2 )',
                  'movers']]) {
-            const b = new Gtk.Button({label, css_classes: ['tg-tab'],
+            const b = new Gtk.Button({icon_name: icon,
+                                      css_classes: ['tg-tab'],
                                       tooltip_text: tip});
             b.connect('clicked', () =>
                 this.activate_action('view', new GLib.Variant('s', view)));

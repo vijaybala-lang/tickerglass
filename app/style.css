@@ -96,20 +96,19 @@ window { font-family: Inter, Cantarell, sans-serif; }
   border-color: alpha(currentcolor, 0.35);
 }
 
-/* navigation-bar style page buttons (Watchlist | Movers in the
- * header): flat labels, no chrome at all. Quiet until hovered; the
- * ACTIVE page gets full-strength text and a slim accent underline —
- * the nav-bar pattern (Material/adw view switcher), so state lives
- * in ink + indicator, never in a shape that shifts geometry */
+/* icon-only nav-bar buttons (Watchlist | Movers in the header):
+ * flat symbolics, quiet until hovered. Symbolic icons re-tint to
+ * the CSS color, so the ACTIVE page needs no shape change — it
+ * takes the accent ink plus a slim accent underline, and geometry
+ * is identical across states */
 .tg-tab {
   background: none;
   border: none;
   box-shadow: none;
-  padding: 4px 12px 6px;
+  padding: 5px 9px;
   margin: 0;
   min-height: 0;
   border-radius: 8px;
-  font-weight: 600;
   opacity: 0.72;
 }
 .tg-tab:hover {
@@ -118,6 +117,7 @@ window { font-family: Inter, Cantarell, sans-serif; }
 }
 .tg-tab-active {
   opacity: 1;
+  color: @accent_color;
   box-shadow: inset 0 -2px 0 @accent_bg_color;
 }
 
