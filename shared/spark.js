@@ -359,19 +359,52 @@ export function paintChart(cr, opts) {
             cr.setSourceRGBA(0.384, 0.627, 0.918, 1);
             cr.fill();
         }
-        const txt = cursorFmt ? cursorFmt(i)
-                              : `${fmtY(p.c)}   ${fmtX(p.t)}`;
-        const tw = drawText(cr, txt, 0, 0, {size: 9, rgba: [1, 1, 1, 1],
-                                            anchor: 'start', vcenter: 1e6});
-        const bxp = Math.max(6, Math.min(w - GUT_R - tw - 16, x - (tw + 16) / 2));
-        roundRect(cr, bxp, 4, tw + 14, 18, 6);
+        const txt2 = cursorFmt ? cursorFmt(i) : null;
+        // cursorFmt may return a plain string (old bubble) or a rich
+        // {date, items:[{text}]} — items render as pills tinted with the
+        // series colors: [primary] [compare] date
+        const segs = (txt2 && typeof txt2 !== 'string') ? txt2 : null;
+        const BLUE = [0.384, 0.627, 0.918];
+        const measure = s => drawText(cr, s, 0, 0, {size: 9,
+            rgba: [1, 1, 1, 1], anchor: 'start', vcenter: 1e6});
+        let bxp, bw, pw = null;
+        if (segs) {
+            pw = (segs.items ?? []).map(it => measure(it.text) + 14);
+            const dateW = segs.date ? measure(segs.date) : 0;
+            bw = pw.reduce((a, b) => a + b, 0) +
+                Math.max(0, pw.length - 1) * 5 +
+                (dateW ? dateW + 8 : 0) + 12;
+        } else {
+            bw = measure(txt2 ?? `${fmtY(p.c)}   ${fmtX(p.t)}`) + 14;
+        }
+        bxp = Math.max(6, Math.min(w - GUT_R - bw - 16, x - bw / 2));
+        roundRect(cr, bxp, 4, bw, segs ? 22 : 18, 6);
         cr.setSourceRGBA(dark ? 0.11 : 0.97, dark ? 0.12 : 0.97,
                         dark ? 0.16 : 0.99, 0.92);
         cr.fill();
-        drawText(cr, txt, bxp + (tw + 14) / 2, 0, {
-            size: 9, rgba: dark ? [1, 1, 1, 0.95] : [...ink, 0.9],
-            vcenter: 13,
-        });
+        if (segs) {
+            let cx = bxp + 6;
+            (segs.items ?? []).forEach((it, k) => {
+                const col = k === 0 ? rgb : BLUE;
+                roundRect(cr, cx, 6, pw[k], 18, 9);
+                cr.setSourceRGBA(col[0], col[1], col[2], 0.16);
+                cr.fill();
+                drawText(cr, it.text, cx + pw[k] / 2, 0, {
+                    size: 9, bold: true, rgba: [...col, 0.98],
+                    vcenter: 15,
+                });
+                cx += pw[k] + 5;
+            });
+            if (segs.date)
+                drawText(cr, segs.date, cx + measure(segs.date) / 2 + 3,
+                    0, {size: 8.5, rgba: [...ink, 0.75], vcenter: 15});
+        } else {
+            drawText(cr, txt2 ?? `${fmtY(p.c)}   ${fmtX(p.t)}`,
+                bxp + bw / 2, 0, {
+                    size: 9, rgba: dark ? [1, 1, 1, 0.95] : [...ink, 0.9],
+                    vcenter: 13,
+                });
+        }
     }
 }
 

@@ -2498,18 +2498,32 @@ class TickerWindow extends Adw.ApplicationWindow {
             ? fmtTime(t, hist.meta.tz)
             : axisDate(t, (hist.points[hist.points.length - 1].t -
                            hist.points[0].t) / 86400);
-        // hover bubble: both tickers' REAL prices at the hovered instant
-        // (the overlay is normalized, the numbers are not)
+        // hover bubble: both tickers' REAL price and window move at the
+        // hovered instant (the overlay is normalized, the numbers are
+        // not). Hero % follows the hero pill's baseline (prev-close on
+        // 1d), benchmark % is its own first point — matching the line
+        // shapes. paintChart tints the pills with each series' color.
         const cmpSym = this._settings.get_string('compare-symbol');
         const cursorFmt = (cmp && cmpSym) ? i => {
             const n0 = hist.points.length - 1;
             const p = hist.points[Math.max(0, Math.min(n0, i))];
             const j = Math.round(i / n0 * (cp.length - 1));
             const c = cp[Math.max(0, Math.min(cp.length - 1, j))];
-            return `${symbolShort(this._hero())} ` +
-                `${fmtPrice(p.c, hist.meta.currency)}  ·  ` +
-                `${symbolShort(cmpSym)} ` +
-                `${fmtPrice(c.c, hist.meta.currency)}  ·  ${xlab(p.t)}`;
+            const cur = hist.meta.currency;
+            const hBase = hist.range === '1d' && hist.meta.prevClose
+                ? hist.meta.prevClose : hist.points[0].c;
+            const seg = (sym, price, frac) => `${sym} ` +
+                `${fmtPrice(price, cur)} ` +
+                `${frac >= 0 ? '\u25B2' : '\u25BC'}${fmtPct(Math.abs(frac))}`;
+            return {
+                date: xlab(p.t),
+                items: [
+                    {text: seg(symbolShort(this._hero()), p.c,
+                               p.c / hBase - 1)},
+                    {text: seg(symbolShort(cmpSym), c.c,
+                               c.c / cp[0].c - 1)},
+                ],
+            };
         } : null;
         paintChart(cr, {
             w, h,
