@@ -238,16 +238,17 @@ list row { border-radius: 12px; }
 .tg-news-list row:hover { background: alpha(currentcolor, 0.08); }
 
 /* movers tiles: FlowBox children stay transparent, the card lives on
- * the tile itself so hover/rounding reads as one object. Every pseudo
- * state is stripped: libadwaita paints its own hover/focus background
- * on flowchild, and a half-covered override showed as a lighter halo
- * around the card */
-.tg-tilegrid > flowchild,
-.tg-tilegrid > flowchild:hover,
-.tg-tilegrid > flowchild:active,
-.tg-tilegrid > flowchild:selected,
-.tg-tilegrid > flowchild:focus,
-.tg-tilegrid > flowchild:focus-within {
+ * the tile itself so hover/rounding reads as one object. Descendant
+ * combinators are MANDATORY: GtkFlowBox inserts an internal box node
+ * between flowbox and flowchild, so '>' matches nothing and the
+ * theme's own flowchild hover background leaked through as a lighter
+ * halo around the card. Every pseudo state is stripped for effect. */
+.tg-tilegrid flowchild,
+.tg-tilegrid flowchild:hover,
+.tg-tilegrid flowchild:active,
+.tg-tilegrid flowchild:selected,
+.tg-tilegrid flowchild:focus,
+.tg-tilegrid flowchild:focus-within {
   background: none;
   background-image: none;
   border: none;
@@ -261,8 +262,8 @@ list row { border-radius: 12px; }
   border-radius: 14px;
   padding: 12px 14px 10px 14px;
 }
-.tg-tilegrid > flowchild:hover .tg-tile,
-.tg-tilegrid > flowchild:selected .tg-tile {
+.tg-tilegrid flowchild:hover .tg-tile,
+.tg-tilegrid flowchild:selected .tg-tile {
   background: alpha(currentcolor, 0.08);
 }
 
