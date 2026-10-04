@@ -539,6 +539,15 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._chart.set_margin_top(8);
         this._chart.add_css_class('tg-chart-area');
         this._chart.set_draw_func((area, cr, w, h) => {
+            // During a sidebar resize the content shrinks every frame
+            // and the chart would otherwise re-render (~4ms, spiking to
+            // 23ms) ~40x/sec — the stutter. Paint a cheap background
+            // while the drag is live and do ONE real render on release.
+            if (this._resizing) {
+                cr.setOperator(Cairo.Operator.CLEAR);
+                cr.paint();
+                return;
+            }
             const t = GLib.getenv('TG_TIMING')
                 ? GLib.get_monotonic_time() : 0;
             this._drawChart(cr, w, h);
@@ -968,6 +977,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         gripDrag.set_button(1);
         gripDrag.connect('drag-begin', () => {
             this._gripStart = this._sidePx;
+            this._resizing = true;
         });
         gripDrag.connect('drag-update', (g, x) => {
             // no GLib.clamp in this GLib — plain Math
@@ -998,6 +1008,8 @@ class TickerWindow extends Adw.ApplicationWindow {
                 this._sideIdle = 0;
             }
             this._applySidebarWidth();   // land exactly on the final px
+            this._resizing = false;
+            this._chart?.queue_draw();   // the one real paint, at rest
             this._settings.set_int('sidebar-width', this._sidePx);
         });
         grip.add_controller(gripDrag);
