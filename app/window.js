@@ -365,7 +365,11 @@ class TickerWindow extends Adw.ApplicationWindow {
         } catch (e) {
             log(`icon path unavailable: ${e.message}`);
         }
-        const navBox = new Gtk.Box({spacing: 4, valign: Gtk.Align.CENTER});
+        // one linked cluster, the same widget recipe as the sidebar's
+        // [+ ☰ 🗑] bar: a .linked box of theme-default buttons — the
+        // joined segmented look, not floating pills
+        const navBox = new Gtk.Box({spacing: 0, valign: Gtk.Align.CENTER,
+                                    css_classes: ['linked']});
         this._navChips = {};
         for (const [key, icon, name, tip, view] of [
                 ['watch', 'starred-symbolic', 'Watchlist',

@@ -101,29 +101,20 @@ window { font-family: Inter, Cantarell, sans-serif; }
  * color, so the ACTIVE page needs no shape change — it takes the
  * accent ink plus a slim accent underline, and geometry is
  * identical across states */
-/* header nav buttons wear the sidebar menu's skin: flat, fully
- * rounded pills; the active view gets the same foreground-ink
- * WASH the ☰ button wears in edit mode (replaces the old 2px
- * underline — no underlines inside pills) */
+/* header nav lives in a .linked cluster (sidebar's button-bar
+ * recipe) — theme-default buttons provide the segmented skin, so
+ * .tg-tab only sizes them and states the active view: accent ink
+ * on a soft accent wash, no pills, no underlines */
 .tg-tab {
-  background: none;
-  border: none;
-  box-shadow: none;
-  padding: 4px 12px;
-  margin: 0;
   min-height: 0;
-  border-radius: 999px;
-  opacity: 0.78;
+  padding: 3px 12px;
 }
 .tg-tab label { font-size: 0.9em; font-weight: 600; }
-.tg-tab:hover {
-  background: alpha(currentcolor, 0.08);
-  opacity: 1;
-}
-.tg-tab-active {
-  opacity: 1;
+.tg-tab-active,
+.tg-tab-active:hover {
   color: @accent_color;
-  background: alpha(currentcolor, 0.10);
+  background-image: none;
+  background-color: alpha(@tg-accent, 0.16);
 }
 
 /* static stat chips under the hero price */
