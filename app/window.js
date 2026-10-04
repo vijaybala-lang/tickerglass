@@ -903,10 +903,22 @@ class TickerWindow extends Adw.ApplicationWindow {
                                        tooltip_text: 'New list (Ctrl+N)'});
         newBtn.set_action_name('win.newlist');
         listBtns.append(newBtn);
-        const renameBtn = new Gtk.Button({icon_name: 'document-edit-symbolic',
-                                          tooltip_text: 'Rename current list'});
-        renameBtn.connect('clicked', () =>
-            this._renameList(this._settings.get_string('active-watchlist')));
+        // The pencil is a MODE toggle, not a command: on = manage
+        // tickers (every row pins out its red ✕ chip — tap to pull a
+        // symbol, no swipe hunting). Rename, its former one-click job,
+        // rides a right-click on the same button (rare action; the
+        // tooltip teaches it).
+        const renameBtn = new Gtk.ToggleButton({
+            icon_name: 'document-edit-symbolic',
+            tooltip_text:
+                'Edit watchlist — rows get remove buttons · right-click to rename'});
+        renameBtn.connect('toggled', (b) =>
+            this._setEditMode(b.get_active()));
+        const renRight = new Gtk.GestureClick({button: 3});
+        renRight.connect('pressed', () =>
+            this._renameList(
+                this._settings.get_string('active-watchlist')));
+        renameBtn.add_controller(renRight);
         listBtns.append(renameBtn);
         const delBtn = new Gtk.Button({icon_name: 'user-trash-symbolic',
                                        tooltip_text: 'Delete current list'});
@@ -1509,6 +1521,11 @@ class TickerWindow extends Adw.ApplicationWindow {
         }
         this._updateWatchRows();
         this._swipeOpen = null;               // rows are new objects now
+        if (this._editMode)                   // rebuild must not unmask
+            for (const r of Object.values(this._symRows)) {
+                r._delBtn?.set_visible(true);
+                r._delBtn?.set_size_request(TG_DEL_W, -1);
+            }
         if (this._ghost)
             this._ghost.set_visible(false);   // stale during a rebuild
         this._clearDropLine();
@@ -1522,6 +1539,15 @@ class TickerWindow extends Adw.ApplicationWindow {
      * real width in the row's hbox (content compresses) — cheap and
      * flicker-free against overlays on transparent rows. */
     _setSwipe(row, open) {
+        if (this._editMode) {
+            // chips are already pinned on every row — a stray swipe
+            // must not play hide-and-seek with them
+            for (const r of Object.values(this._symRows ?? {})) {
+                r._delBtn?.set_visible(true);
+                r._delBtn?.set_size_request(TG_DEL_W, -1);
+            }
+            return;
+        }
         for (const r of Object.values(this._symRows ?? {})) {
             if (r !== row) {
                 r._delBtn?.set_visible(false);
@@ -1531,6 +1557,18 @@ class TickerWindow extends Adw.ApplicationWindow {
         row._delBtn?.set_visible(open);
         row._delBtn?.set_size_request(open ? TG_DEL_W : -1, -1);
         this._swipeOpen = open ? row : null;
+    }
+
+    /* edit mode (header pencil): EVERY row pins its ✕ chip out, so
+     * removing tickers is one tap each instead of a swipe per row.
+     * Transient on purpose — always starts off with the app. */
+    _setEditMode(on) {
+        this._editMode = on;
+        for (const r of Object.values(this._symRows ?? {})) {
+            r._delBtn?.set_visible(on);
+            r._delBtn?.set_size_request(on ? TG_DEL_W : -1, -1);
+        }
+        this._swipeOpen = null;
     }
 
     /* THE app's up/down indicator: chunky filled triangle, rounded
