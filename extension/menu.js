@@ -181,19 +181,16 @@ export class TickerPanel {
         const m = new St.BoxLayout({vertical: true, style_class: 'tg-main',
                                     visible: false});
 
-        /* header: watchlist switcher • market status • refresh */
+        /* header: active watchlist (read-only — the lists live in the
+         * app & prefs) • market status • refresh */
         const head = row();
         head.style_class = 'tg-header';
-        this._wlBtn = new St.Button({style_class: 'tg-wl-btn',
-                                     can_focus: true});
         this._wlBox = col();
         this._wlLbl = new St.Label({text: 'Watchlist', style_class: 'tg-wl'});
         this._wlSub = new St.Label({text: '', style_class: 'tg-wl-sub'});
         this._wlBox.add_child(this._wlLbl);
         this._wlBox.add_child(this._wlSub);
-        this._wlBtn.set_child(this._wlBox);
-        this._wlBtn.connect('clicked', () => this._cycleWatchlist());
-        head.add_child(this._wlBtn);
+        head.add_child(this._wlBox);
         head.add_child(spacer());
         this._statusLbl = new St.Label({text: '', style_class: 'tg-status'});
         head.add_child(this._statusLbl);
@@ -279,15 +276,6 @@ export class TickerPanel {
         }
     }
 
-    _cycleWatchlist() {
-        if (!this._wl || this._wl.length < 2) {
-            this._openPrefs();
-            return;
-        }
-        const i = Math.max(0, this._wl.findIndex(w => w.id === this._active));
-        this.onSwitchWl?.(this._wl[(i + 1) % this._wl.length].id);
-    }
-
     /* public API driven by extension.js */
 
     render(state) {
@@ -318,7 +306,8 @@ export class TickerPanel {
         const wl = this._wl.find(w => w.id === this._active);
         this._wlLbl.set_text(wl?.name ?? '');
         this._wlSub.set_text(this._wl.length > 1
-            ? _('tap to switch') : _('1 list · ⚙ to edit'));
+            ? _('%d lists · edit in app/⚙').format(this._wl.length)
+            : _('edit in app/⚙'));
 
         const hero = state.quotes.find(q => q.symbol === state.hero)
                   ?? state.quotes[0];

@@ -19,18 +19,18 @@
  * tg- prefixed, glass fills over the popup, hierarchy via font-weight not
  * opacity, double-declaration accent fallback. */
 
-/* ── panel ──────────────────────────────────────────────────────────────── */
-.tg-panel-box { spacing: 5px; padding: 0 2px; }
-.tg-panel-spark { margin-right: 1px; }
-.tg-panel-price { font-weight: 700; }
-.tg-panel-sym { font-weight: 600; }
-.tg-panel-chg { font-weight: 500; font-size: 0.9em; }
-
-/* up/down ink: bright enough for dark panels, deep enough for light ones */
-.tg-panel-box.tg-dark .tg-up   { color: #00d97a; }
-.tg-panel-box.tg-dark .tg-down { color: #ff5c6c; }
-.tg-panel-box.tg-light .tg-up   { color: #00995a; }
-.tg-panel-box.tg-light .tg-down { color: #e8435a; }
+/* ── panel: the LED movers tape ─────────────────────────────────────────
+ * The glyphs are painted by PangoCairo (colors live in extension.js —
+ * CSS can't reach cairo ink), so the stylesheet's whole job is the
+ * BOARD: a near-black inset bezel with a phosphor-tinted hairline,
+ * like a slab of LED matrix bolted into the top bar. */
+.tg-tape {
+    background-color: rgba(3, 8, 6, 0.92);
+    border: 1px solid rgba(0, 255, 150, 0.16);
+    border-radius: 4px;
+    padding: 1px 8px;
+    margin: 0 4px;
+}
 
 /* ── popup chrome ───────────────────────────────────────────────────────── */
 /* compound selector outranks the theme's popup padding (weatherglass trick) */

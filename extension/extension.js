@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-/* extension.js — panel sparkline button, timers, settings glue.
+/* extension.js — panel LED movers-tape button, timers, settings glue.
  * Conventions inherited from weatherglass/extension.js: PanelMenu.Button
  * subclass, gsettings-driven everything, monotonic timers with 0 sentinels,
  * _busy/_refetch/_dead async guards, stale data kept on failure. */
@@ -26,6 +26,8 @@ import Gio from 'gi://Gio';
 import GObject from 'gi://GObject';
 import St from 'gi://St';
 import Cairo from 'gi://cairo';
+import Pango from 'gi://Pango';
+import PangoCairo from 'gi://PangoCairo';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
@@ -36,67 +38,120 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {MarketClient} from './yahoo.js';
 import {TickerPanel} from './menu.js';
 import {initI18n, _} from './i18n.js';
-import {paintSparkline} from './spark.js';
-import {parseWatchlists, fmtPrice, fmtDelta, fmtPct, COLORS} from './fmt.js';
+import {parseWatchlists, fmtPrice, fmtDelta, fmtPct} from './fmt.js';
 
 const FRAME_MS = 50;          // 20 fps, same budget as weatherglass icons
+const TAPE_SPEED = 55;        // px/s — airport-board pace, right to left
 
-/* ── the animated panel sparkline ────────────────────────────────────────
- * St.DrawingArea + vfunc_repaint; the clock self-idles on .mapped (GNOME 50
- * has no map signals) and clamps frame deltas, weatherglass rules. */
-const SparkIcon = GObject.registerClass(
-class SparkIcon extends St.DrawingArea {
+/* LED-matrix palette: saturated phosphor greens/reds on a near-black
+ * board; the dim color is the separator dots and the idle legend */
+const LED = {
+    up: [0.24, 1.00, 0.55],
+    down: [1.00, 0.36, 0.42],
+    dim: [0.55, 0.60, 0.58],
+};
+
+/* ── the scrolling LED tape ────────────────────────────────────────────────
+ * St.DrawingArea + PangoCairo. The stream is a list of colored runs
+ * (monospace bold, the LED-board face); each frame advances a byte-
+ * precise offset and the strip is painted at x, x+W, x+2W… so the seam
+ * where it wraps is invisible — provided every run ends padded, which
+ * the caller (extension.js _renderTape) guarantees. 20 fps at 55 px/s
+ * is ~3 px/frame: smoother than the real thing. */
+const MoversTape = GObject.registerClass(
+class MoversTape extends St.DrawingArea {
     _init() {
-        super._init({style_class: 'tg-panel-spark', reactive: false,
+        super._init({style_class: 'tg-tape', reactive: false,
                      can_focus: false,
-                     x_align: Clutter.ActorAlign.CENTER,
                      y_align: Clutter.ActorAlign.CENTER,
-                     width: 56, height: 18});
-        this._values = null;
-        this._prevClose = null;
-        this._progress = 1;       // draw-in sweep after each update
-        this._up = true;
-        this._t0 = GLib.get_monotonic_time();
+                     width: 300, height: 20});
+        this._runs = [];           // [{layout, wpx, rgb}]
+        this._stripW = 0;
+        this._off = 0;
+        this._last = GLib.get_monotonic_time();
+        this._idleText = '';
+        this._idleLayout = null;
         this._clockId = 0;
         this.connect('destroy', () => this._stop());
         this._start();
     }
 
-    setSeries(values, prevClose, animate = true) {
-        this._values = values;
-        this._prevClose = prevClose;
-        if (values?.length)
-            this._up = prevClose != null
-                ? values.at(-1) >= prevClose : values.at(-1) >= values[0];
-        this._progress = animate ? 0 : 1;
-        this._t0 = GLib.get_monotonic_time();
+    /** items: [{text, rgb}] — painted in order, scrolling as one strip */
+    setItems(items) {
+        const ctx = this.get_pango_context();
+        const desc = Pango.FontDescription.from_string('Monospace Bold 10');
+        this._runs = [];
+        this._stripW = 0;
+        for (const it of items ?? []) {
+            if (!it?.text)
+                continue;
+            const lay = new Pango.Layout(ctx);
+            lay.set_font_description(desc);
+            lay.set_text(it.text, -1);
+            const [wp] = lay.get_pixel_size();
+            this._runs.push({lay, wp, rgb: it.rgb ?? LED.dim});
+            this._stripW += wp;
+        }
+        // a strip narrower than the window would smear the seam; pad it
+        // by repeating the whole set once (cheap — these are tiny)
+        if (this._runs.length && this._stripW < 300) {
+            const again = this._runs.map(r => r);
+            for (const r of again) {
+                this._runs.push(r);
+                this._stripW += r.wp;
+            }
+        }
+        this._off = 0;
+        this.queue_repaint();
+    }
+
+    setIdle(text) {
+        this._idleText = text ?? '';
+        const lay = new Pango.Layout(this.get_pango_context());
+        lay.set_font_description(
+            Pango.FontDescription.from_string('Monospace 10'));
+        lay.set_text(this._idleText, -1);
+        this._idleLayout = this._idleText ? lay : null;
+        this._runs = [];
+        this._stripW = 0;
+        this.queue_repaint();
     }
 
     vfunc_repaint() {
-        // repaint rule: touch only get_surface_size + get_context here
-        let [width, height] = this.get_surface_size();
-        if (width <= 0 || height <= 0)
+        let [w, h] = this.get_surface_size();
+        if (w <= 0 || h <= 0)
             return;
         const cr = this.get_context();
         cr.setOperator(Cairo.Operator.CLEAR);
         cr.paint();
         cr.setOperator(Cairo.Operator.OVER);
-        paintSparkline(cr, {
-            w: width, h: height, values: this._values ?? [],
-            prevClose: this._prevClose, progress: this._progress,
-            glow: this._values?.length && this._progress >= 1
-                ? (1 + Math.sin((GLib.get_monotonic_time() - this._t0)
-                                / 1e6 * Math.PI / 1.25)) / 2 : 0,
-        });
-    }
 
-    _tick() {
-        const now = GLib.get_monotonic_time();
-        if (this._progress < 1) {
-            this._progress =
-                Math.min(1, (now - this._t0) / 1e6 / 0.55);   // 550 ms draw-in
+        if (!this._runs.length) {
+            if (this._idleLayout) {
+                const [, lh] = this._idleLayout.get_pixel_size();
+                cr.setSourceRGBA(...LED.dim, 0.85);
+                cr.moveTo(Math.max(6, (w - this._idleLayout.
+                    get_pixel_size()[0]) / 2), (h - lh) / 2);
+                PangoCairo.show_layout(cr, this._idleLayout);
+            }
+            return;
         }
-        return Clutter.SOURCE_CONTINUE ?? GLib.SOURCE_CONTINUE;
+
+        let y = (h - this._runs[0].lay.get_pixel_size()[1]) / 2;
+        // draw at -off mod W, then tile rightward past the viewport
+        let x = -(this._off % this._stripW);
+        if (x > 0)
+            x -= this._stripW;
+        for (; x < w; x += this._stripW) {
+            let cx = x;
+            for (const r of this._runs) {
+                cr.setSourceRGBA(...r.rgb, 1);
+                cr.moveTo(cx, y);
+                PangoCairo.show_layout(cr, r.lay);
+                cr.newPath();
+                cx += r.wp;
+            }
+        }
     }
 
     _start() {
@@ -104,8 +159,15 @@ class SparkIcon extends St.DrawingArea {
             return;
         this._clockId = GLib.timeout_add(GLib.PRIORITY_LOW, FRAME_MS, () => {
             if (this.mapped ?? true) {
-                this._tick();
-                this.queue_repaint();
+                const now = GLib.get_monotonic_time();
+                const dt = Math.min(0.25, (now - this._last) / 1e6);
+                this._last = now;
+                if (this._stripW) {
+                    this._off = (this._off + dt * TAPE_SPEED) % this._stripW;
+                    this.queue_repaint();
+                }
+            } else {
+                this._last = GLib.get_monotonic_time();
             }
             return GLib.SOURCE_CONTINUE;
         });
@@ -119,12 +181,6 @@ class SparkIcon extends St.DrawingArea {
     }
 });
 
-/* cairo.CLEAR without importing cairo in this module (painters own cairo):
- * Operator.CLEAR == 0, and St repaints need a real clear each frame. */
-function CairoClear() {
-    return 0;   // CAIRO_OPERATOR_CLEAR
-}
-
 /* ── the indicator ──────────────────────────────────────────────────────── */
 const TickerIndicator = GObject.registerClass(
 class TickerIndicator extends PanelMenu.Button {
@@ -134,27 +190,20 @@ class TickerIndicator extends PanelMenu.Button {
         this._ext = ext;
         this._settings = ext.getSettings();
         this._client = new MarketClient(this._settings.get_string('data-source'));
-        this._timer = 0; this._retryTimer = 0; this._tickerId = 0;
+        this._timer = 0; this._retryTimer = 0; this._mvTimer = 0;
         this._busy = false; this._refetch = false; this._dead = false;
+        this._mvBusy = false;
         this._quotes = [];
-        this._tickerIdx = 0;
+        this._movers = null;       // {g, l, at} — screener answers
+        this._mvFailAt = 0;
 
         this._dark = _interfaceIsDark();
 
-        // panel contents
-        this._box = new St.BoxLayout({style_class: 'tg-panel-box',
-                                      y_align: Clutter.ActorAlign.CENTER});
-        this._spark = new SparkIcon();
-        this._symLbl = new St.Label({style_class: 'tg-panel-sym'});
-        this._priceLbl = new St.Label({style_class: 'tg-panel-price',
-                                       y_align: Clutter.ActorAlign.CENTER});
-        this._chgLbl = new St.Label({style_class: 'tg-panel-chg',
-                                     y_align: Clutter.ActorAlign.CENTER});
-        this._box.add_child(this._spark);
-        this._box.add_child(this._symLbl);
-        this._box.add_child(this._priceLbl);
-        this._box.add_child(this._chgLbl);
-        this.add_child(this._box);
+        // the panel IS the tape: a stream of the market's biggest
+        // gainers then losers, LED-board styled
+        this._tape = new MoversTape();
+        this._tape.setIdle('TICKERGLASS · waking up');
+        this.add_child(this._tape);
 
         // dropdown card
         this._panel = new TickerPanel({
@@ -170,8 +219,6 @@ class TickerIndicator extends PanelMenu.Button {
             this._settings.set_string('chart-range', r);
         this._panel.onSelect = sym =>
             this._settings.set_string('selected-symbol', sym);
-        this._panel.onSwitchWl = id =>
-            this._settings.set_string('active-watchlist', id);
         this.menu.actor.add_style_class_name('tg-menu');
         for (let a = this._panel.actor; a; a = a.get_parent()) {
             a.set_style('padding: 0px; margin: 0px; border-width: 0px;');
@@ -194,8 +241,6 @@ class TickerIndicator extends PanelMenu.Button {
         this._settingsId = this._settings.connect('changed',
             (s, key) => this._onSetting(key));
 
-        this._applyPanelMode();
-        this._renderPanel();
         this._fetch(true);
         this._restartTimer();
     }
@@ -207,15 +252,6 @@ class TickerIndicator extends PanelMenu.Button {
         const id = this._settings.get_string('active-watchlist');
         const wl = lists.find(w => w.id === id) ?? lists[0];
         return wl?.symbols ?? [];
-    }
-
-    _lead() {
-        const lead = this._settings.get_string('panel-lead-symbol');
-        const syms = this._symbols();
-        if (lead && syms.includes(lead))
-            return lead;
-        const sel = this._settings.get_string('selected-symbol');
-        return syms.includes(sel) ? sel : (syms[0] ?? '');
     }
 
     _heroSymbol() {
@@ -260,6 +296,7 @@ class TickerIndicator extends PanelMenu.Button {
                         return GLib.SOURCE_REMOVE;
                     });
             this._error = 'rate';
+            this._renderTape();
             this._panel.render(this._state());
             return;
         }
@@ -267,7 +304,7 @@ class TickerIndicator extends PanelMenu.Button {
         if (!symbols.length) {
             this._quotes = [];
             this._error = 'empty';
-            this._renderPanel();
+            this._renderTape();
             this._panel.render(this._state());
             return;
         }
@@ -284,10 +321,11 @@ class TickerIndicator extends PanelMenu.Button {
                               !res.quotes.some(q => q.price != null)
                     ? 'fetch' : null;
                 this._busy = false;
-                this._renderPanel();
+                this._renderTape();
                 this._panel.render(this._state());
                 this._panel.ensureHero();
                 this._restartTimer();
+                this._maybeMovers();
                 if (this._refetch) {
                     this._refetch = false;
                     this._fetch(true);
@@ -299,9 +337,101 @@ class TickerIndicator extends PanelMenu.Button {
                 logError(e, 'TickerGlass');
                 this._error = /429|rate/.test(String(e)) ? 'rate' : 'fetch';
                 this._busy = false;
+                this._renderTape();
                 this._panel.render(this._state());
                 this._restartTimer();
             });
+    }
+
+    /* ── movers for the tape ────────────────────────────────────────────
+     * the SAME screener source the app's Movers page rides (Yahoo-side
+     * even under the Nasdaq source — the facade routes it); 120 s TTL
+     * while the market is awake, patient when it isn't, backoff on
+     * failure, and a watchlist-bred fallback so the tape never dies
+     * just because the screener is being stingy */
+
+    _marketAwake() {
+        return this._quotes.some(q => q.state === 'REGULAR' ||
+            q.state === 'PRE' || q.state === 'POST');
+    }
+
+    _maybeMovers() {
+        if (this._mvBusy || this._dead)
+            return;
+        const now = GLib.get_monotonic_time() / 1e6;
+        const want = this._movers ? (this._marketAwake() ? 120 : 600) : 0;
+        if (this._movers && now - this._movers.at < want)
+            return;                       // still fresh
+        if (!this._movers && this._mvFailAt &&
+                now - this._mvFailAt < 180)
+            return;                       // never landed: slow retry
+        this._mvBusy = true;
+        Promise.all([
+            this._client.screener('day_gainers', 6),
+            this._client.screener('day_losers', 6),
+        ]).then(([g, l]) => {
+            if (this._dead)
+                return;
+            this._mvFailAt = 0;
+            this._movers = {g, l, at: GLib.get_monotonic_time() / 1e6};
+            this._mvBusy = false;
+            this._renderTape();
+        }).catch(e => {
+            if (this._dead)
+                return;
+            log(`TickerGlass ext: movers failed: ${e.message}`);
+            this._mvFailAt = GLib.get_monotonic_time() / 1e6;
+            this._mvBusy = false;
+            this._renderTape();           // watchlist fallback on screen
+        });
+    }
+
+    _renderTape() {
+        const mv = this._movers;
+        let g = mv?.g?.slice(0, 5) ?? [];
+        let l = mv?.l?.slice(0, 5) ?? [];
+        g = g.filter(m => m.price != null);
+        l = l.filter(m => m.price != null);
+        if (!g.length && !l.length) {
+            // fallback: the watchlist's own best and worst five
+            const qs = this._quotes.filter(q => q.price != null &&
+                q.changePct != null);
+            qs.sort((a, b) => b.changePct - a.changePct);
+            g = qs.slice(0, 5);
+            const inG = new Set(g);
+            l = qs.slice(-5).filter(q => !inG.has(q)).reverse();
+        }
+        if (!g.length && !l.length) {
+            this._tape.setIdle(this._error === 'rate'
+                ? 'TICKERGLASS · feed rate-limited, retrying'
+                : this._error === 'empty'
+                    ? 'TICKERGLASS · no symbols — configure in ⚙'
+                    : 'TICKERGLASS · waiting for the feed');
+            return;
+        }
+        const segs = [];
+        const push = (arr, up) => {
+            for (const m of arr) {
+                segs.push({
+                    text: `${m.symbol.replace(/^\^/, '')}  ` +
+                        `${fmtPrice(m.price, m.currency)}  ` +
+                        `${up ? '▲' : '▼'}${fmtPct(Math.abs(m.changePct ?? 0))}   `,
+                    rgb: up ? LED.up : LED.down,
+                });
+                segs.push({text: '·   ', rgb: LED.dim});
+            }
+        };
+        push(g, true);
+        push(l, false);
+        this._tape.setItems(segs);
+        // keep the strip honest even when nothing else wakes up
+        if (!this._mvTimer)
+            this._mvTimer = GLib.timeout_add_seconds(
+                GLib.PRIORITY_LOW, 120, () => {
+                    this._mvTimer = 0;
+                    this._maybeMovers();
+                    return GLib.SOURCE_REMOVE;
+                });
     }
 
     async _loadHero(symbol, range) {
@@ -320,83 +450,6 @@ class TickerIndicator extends PanelMenu.Button {
             logError(e, 'TickerGlass');
             this._panel.setHeroSeries(null);
         }
-    }
-
-    /* ── panel rendering ──────────────────────────────────────────────── */
-
-    _renderPanel() {
-        const lead = this._lead();
-        const q = this._quotes.find(x => x.symbol === lead);
-        const mode = this._settings.get_string('panel-mode');
-        const showChg = this._settings.get_boolean('panel-show-change');
-        const darkCls = this._dark ? 'tg-dark' : 'tg-light';
-        this._box.remove_style_class_name(this._dark ? 'tg-light' : 'tg-dark');
-        this._box.add_style_class_name(darkCls);
-
-        const up = q?.change != null ? q.change >= 0 : true;
-        const dirCls = up ? 'tg-up' : 'tg-down';
-        for (const lbl of [this._priceLbl, this._chgLbl, this._symLbl]) {
-            lbl.remove_style_class_name('tg-up');
-            lbl.remove_style_class_name('tg-down');
-        }
-
-        if (mode === 'ticker') {
-            this._spark.hide();
-            this._symLbl.show();
-            this._startTicker();
-        } else {
-            this._symLbl.hide();
-            this._spark.visible = mode === 'sparkline';
-            this._stopTicker();
-            this._spark.remove_style_class_name('tg-up');
-            this._spark.remove_style_class_name('tg-down');
-            const spark = q?.spark?.length
-                ? q.spark : this._quotes.find(x => x.spark?.length)?.spark;
-            this._spark.setSeries(spark ?? null, q?.prevClose ?? null);
-            if (spark)
-                this._spark.add_style_class_name(dirCls);
-        }
-
-        this._priceLbl.add_style_class_name(dirCls);
-        this._priceLbl.set_text(q?.price != null
-            ? fmtPrice(q.price, q.currency) : '—');
-        this._chgLbl.visible = showChg && q?.change != null;
-        this._chgLbl.add_style_class_name(dirCls);
-        if (q?.change != null)
-            this._chgLbl.set_text(
-                `${q.changePct >= 0 ? '▲' : '▼'} ${fmtPct(q.changePct)}`);
-    }
-
-    _startTicker() {
-        this._stopTicker();
-        const spin = () => {
-            const qs = this._quotes.filter(q => q.price != null);
-            if (!qs.length)
-                return GLib.SOURCE_CONTINUE;
-            this._tickerIdx = (this._tickerIdx + 1) % qs.length;
-            const q = qs[this._tickerIdx];
-            this._symLbl.remove_style_class_name('tg-up');
-            this._symLbl.remove_style_class_name('tg-down');
-            this._symLbl.add_style_class_name(q.change >= 0 ? 'tg-up' : 'tg-down');
-            this._symLbl.set_text(`${q.symbol.replace(/^\^/, '')} ` +
-                                  fmtPrice(q.price, q.currency));
-            return GLib.SOURCE_CONTINUE;
-        };
-        spin();
-        this._tickerId = GLib.timeout_add_seconds(GLib.PRIORITY_LOW, 4, spin);
-    }
-
-    _stopTicker() {
-        if (this._tickerId) {
-            GLib.source_remove(this._tickerId);
-            this._tickerId = 0;
-        }
-    }
-
-    _applyPanelMode() {
-        // symbol label only exists in ticker mode
-        if (this._settings.get_string('panel-mode') !== 'ticker')
-            this._stopTicker();
     }
 
     /* ── timers & settings ────────────────────────────────────────────── */
@@ -431,7 +484,6 @@ class TickerIndicator extends PanelMenu.Button {
         case 'selected-symbol':
             this._panel.render(this._state());
             this._panel.ensureHero();
-            this._renderPanel();
             break;
         case 'chart-range':
         case 'chart-interval':
@@ -442,24 +494,18 @@ class TickerIndicator extends PanelMenu.Button {
             this._client.setSource(this._settings.get_string('data-source'));
             this._fetch(true);
             break;
-        case 'refresh-seconds':
-        case 'panel-mode':
-        case 'panel-lead-symbol':
-        case 'panel-show-change':
         case 'panel-spark-range':
-            this._applyPanelMode();
-            this._renderPanel();
-            if (key === 'panel-spark-range')
-                this._fetch(true);
-            else if (key === 'refresh-seconds')
-                this._restartTimer();
+            this._fetch(true);       // the dropdown rows' sparks change
+            break;
+        case 'refresh-seconds':
+            this._restartTimer();
             break;
         }
     }
 
     destroy() {
         this._dead = true;
-        for (const id of [this._timer, this._retryTimer, this._tickerId])
+        for (const id of [this._timer, this._retryTimer, this._mvTimer])
             if (id)
                 GLib.source_remove(id);
         if (this._settingsId)

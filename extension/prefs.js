@@ -203,53 +203,18 @@ export default class TickerGlassPrefs extends ExtensionPreferences {
             title: _('Panel'), icon_name: 'preferences-system-symbolic',
         });
         const g = new Adw.PreferencesGroup({title: _('In the top bar')});
+        g.description = _('The panel streams the market\u2019s 5 biggest ' +
+            'gainers and 5 biggest losers as a scrolling LED tape — ' +
+            'refreshed every two minutes while the market is awake. If the ' +
+            'screener is unreachable, your own watchlist\u2019s best and ' +
+            'worst five ride the tape instead.');
+        page.add(g);
 
-        const modeIds = ['sparkline', 'ticker', 'price'];
-        const modeRow = new Adw.ComboRow({
-            title: _('Presentation'),
-            model: new Gtk.StringList({
-                strings: [_('Sparkline of the lead symbol'),
-                          _('Rolling ticker of the whole watchlist'),
-                          _('Price only')],
-            }),
-        });
-        modeRow.selected = Math.max(0, modeIds.indexOf(
-            settings.get_string('panel-mode')));
-        modeRow.connect('notify::selected', () =>
-            settings.set_string('panel-mode', modeIds[modeRow.selected]));
-        g.add(modeRow);
-
-        const leadRow = new Adw.ComboRow({title: _('Lead symbol')});
-        const refreshLead = () => {
-            const syms = this._read(settings)
-                .find(w => w.id === settings.get_string('active-watchlist'))
-                ?.symbols ?? [];
-            leadRow.model = new Gtk.StringList({
-                strings: [_('(first in watchlist)'), ...syms],
-            });
-            const lead = settings.get_string('panel-lead-symbol');
-            const i = syms.indexOf(lead);
-            leadRow.selected = i + 1 > 0 ? i + 1 : 0;
-        };
-        leadRow.connect('notify::selected', () =>
-            settings.set_string('panel-lead-symbol',
-                leadRow.selected === 0 ? ''
-                    : leadRow.model.getString(leadRow.selected)));
-        refreshLead();
-        settings.connect('changed::watchlists', refreshLead);
-        g.add(leadRow);
-
-        const chgRow = new Adw.SwitchRow({
-            title: _('Show change'), subtitle: _('± % next to the price'),
-        });
-        settings.bind('panel-show-change', chgRow, 'active',
-                      Gio.SettingsBindFlags.DEFAULT);
-        g.add(chgRow);
-
+        const g2 = new Adw.PreferencesGroup({title: _('Dropdown rows')});
         const sparkIds = ['1d', '5d'];
         const sparkRow = new Adw.ComboRow({
             title: _('Sparkline window'),
-            subtitle: _('What the panel curve covers'),
+            subtitle: _('What each watchlist row\u2019s spark covers'),
             model: new Gtk.StringList({
                 strings: [_('Today'), _('Last 5 days')]}),
         });
@@ -258,8 +223,8 @@ export default class TickerGlassPrefs extends ExtensionPreferences {
         sparkRow.connect('notify::selected', () =>
             settings.set_string('panel-spark-range',
                                 sparkIds[sparkRow.selected]));
-        g.add(sparkRow);
-        page.add(g);
+        g2.add(sparkRow);
+        page.add(g2);
         return page;
     }
 
