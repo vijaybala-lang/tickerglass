@@ -117,7 +117,9 @@ class ChartArea extends St.DrawingArea {
 const MiniSpark = GObject.registerClass(
 class MiniSpark extends St.DrawingArea {
     _init(values, up) {
-        super._init({style_class: 'tg-row-spark', width: 44, height: 14,
+        // same painter as the app sidebar rows (shared paintMiniSpark) —
+        // and now the same 56×22 box, so the curve renders identically
+        super._init({style_class: 'tg-row-spark', width: 56, height: 22,
                      reactive: false, can_focus: false,
                      y_align: Clutter.ActorAlign.CENTER});
         this._values = values ?? null;
