@@ -163,6 +163,16 @@ window { font-family: Inter, Cantarell, sans-serif; }
     color: #ffffff;
     font-weight: 700;
 }
+/* faint side handle (‖) that fades in at organize mode: soft bars,
+ * dead to the pointer — the DRAG rides the row gesture, the handle
+ * is purely the “start here” affordance */
+.tg-handle {
+  color: alpha(currentColor, 0.30);
+  font-size: 0.9em;
+  font-weight: 800;
+  margin-left: 4px;
+}
+
 /* drop-position indicator for sidebar reordering: a 2px bar riding
  * the list's overlay, positioned by translate_coordinates — the old
  * inset box-shadow on rounded navigation-sidebar rows rendered

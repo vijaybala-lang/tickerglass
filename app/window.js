@@ -902,7 +902,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         // that — the pencil promised “edit”, then revealed a menu
         const editBtn = new Gtk.MenuButton({
             icon_name: 'open-menu-symbolic',
-            tooltip_text: 'Watchlist actions · rename, remove tickers',
+            tooltip_text: 'Watchlist actions · rename, organize tickers',
             popover: this._wlMenu,
         });
         this._manageBtn = editBtn;
@@ -1459,6 +1459,13 @@ class TickerWindow extends Adw.ApplicationWindow {
                                          margin_bottom: 5});
             nameL.add_css_class('tg-row-name');
             row._nameL = nameL;
+            // faint side handle, organize mode only: two soft bars
+            // that say "grippable" right where the grip lives
+            const handleL = new Gtk.Label({label: '‖', can_target: false,
+                                           valign: Gtk.Align.CENTER});
+            handleL.add_css_class('tg-handle');
+            handleL.set_visible(false);
+            row._handleL = handleL;
             const spark = new Gtk.DrawingArea({content_width: 56,
                                                content_height: 22});
             spark.set_hexpand(true);
@@ -1522,13 +1529,16 @@ class TickerWindow extends Adw.ApplicationWindow {
             // own swipe controllers) — while plain gestures, which never
             // leave the client, work fine.
             row.add_controller(this._rowGesture(row, delBtn));
-        // grab cursor: rows must LOOK draggable (try/catch: Gdk cursor
-        // construction is the kind of thing this GJS drops on the floor)
+        // grab cursor: only while ORGANIZE mode makes rows actually
+        // draggable — outside it rows shouldn't advertise a grip they
+        // don't honor (try/catch: Gdk cursor construction is the kind
+        // of thing this GJS drops on the floor)
         const hov = new Gtk.EventControllerMotion();
         hov.connect('enter', () => {
             try {
-                row.set_cursor(Gdk.Cursor.new_from_name('all-scroll',
-                    null));
+                if (this._editMode)
+                    row.set_cursor(Gdk.Cursor.new_from_name('all-scroll',
+                        null));
             } catch (e) { /* cursor is polish, not function */ }
         });
         hov.connect('leave', () => {
@@ -1550,6 +1560,7 @@ class TickerWindow extends Adw.ApplicationWindow {
             const rowWrap = new Gtk.Box({
                 orientation: Gtk.Orientation.HORIZONTAL, spacing: 8,
                 margin_start: 10, margin_end: 10});
+            rowWrap.append(handleL);
             rowWrap.append(leftV);
             rowWrap.append(praw);
             rowWrap.append(delBtn);
@@ -1568,6 +1579,7 @@ class TickerWindow extends Adw.ApplicationWindow {
             for (const r of Object.values(this._symRows)) {
                 r._delBtn?.set_visible(true);
                 r._delBtn?.set_size_request(TG_DEL_W, -1);
+                r._handleL?.set_visible(true);
             }
         if (this._ghost)
             this._ghost.set_visible(false);   // stale during a rebuild
@@ -1717,9 +1729,11 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._swipeOpen = open ? row : null;
     }
 
-    /* edit mode (header pencil): EVERY row pins its ✕ chip out, so
-     * removing tickers is one tap each instead of a swipe per row.
-     * Transient on purpose — always starts off with the app. */
+    /* organize mode (menu): every row pins its trash pill AND becomes
+     * reorder-draggable, with the ‖ handle appearing at the grip
+     * column. Outside the mode, rows do not drag at all — the gesture
+     * stays unclaimed and the grab cursor stays away. Transient on
+     * purpose — always starts off with the app. */
     _setEditMode(on) {
         this._editMode = on;
         if (this._manageBtn) {
@@ -1731,6 +1745,13 @@ class TickerWindow extends Adw.ApplicationWindow {
         for (const r of Object.values(this._symRows ?? {})) {
             r._delBtn?.set_visible(on);
             r._delBtn?.set_size_request(on ? TG_DEL_W : -1, -1);
+            r._handleL?.set_visible(on);
+            // re-cursor rows under/awaiting the pointer immediately
+            try {
+                r.set_cursor(on
+                    ? Gdk.Cursor.new_from_name('all-scroll', null)
+                    : null);
+            } catch (e) { /* cursor is polish */ }
         }
         this._swipeOpen = null;
     }
@@ -1879,6 +1900,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         const gdb = !!GLib.getenv('TG_GESTURE');
         let axis = null, startOff = 0, off = 0, upd = 0;
         let rowH = 1, moved = false, lastY = 0;
+        let inert = false;
         // GestureDrag::drag-begin passes (x, y, sequence) — sequence is
         // LAST, and the axis must be decided here (a gesture left
         // participating without claim/release poisons other handlers)
@@ -1894,6 +1916,17 @@ class TickerWindow extends Adw.ApplicationWindow {
                                       : [false, 0, 0];
             if (okS && okP && Math.abs(px - sx) > Math.abs(py - sy))
                 axis = 'x';
+            inert = false;
+            // reordering is an ORGANIZE-mode action: outside it, a
+            // vertical hold-drag stays inert — the gesture never
+            // claims the sequence, so GTK's own affordances (text
+            // selection, scrolling) are undisturbed and the list
+            // physically cannot be dragged
+            if (axis === 'y' && !this._editMode) {
+                inert = true;
+                this._dragging = false;
+                return;
+            }
             // get_height() survives in this GJS; get_alloc and
             // set_translation do NOT exist here (probed), so there is no
             // transform API to lift the row — feedback is opacity only,
@@ -1921,6 +1954,8 @@ class TickerWindow extends Adw.ApplicationWindow {
                 g.set_sequence_state(seq, Gtk.EventSequenceState.CLAIMED);
         });
         g.connect('drag-update', (self, x, y) => {
+            if (inert)
+                return;
             if (axis === 'x') {
                 if (gdb && ++upd > 3)
                     return;
@@ -1984,6 +2019,8 @@ class TickerWindow extends Adw.ApplicationWindow {
         });
         g.connect('drag-end', () => {
             this._dragging = false;
+            if (inert)
+                return;      // never engaged; nothing to settle
             // GestureDrag folds cancel into end — settle covers both
             if (gdb)
                 log(`GESTURE row-end ${row._sym} axis=${axis} off=${off}`
@@ -2233,7 +2270,7 @@ class TickerWindow extends Adw.ApplicationWindow {
                 `Rename “${wl.name || wl.id}”`, () => this._renameList(wl.id));
         box.append(new Gtk.Separator({margin_top: 4, margin_bottom: 4}));
         // the MODE, spelled out as its own item with a live checkmark
-        item('edit-delete-symbolic', 'Remove tickers',
+        item('edit-delete-symbolic', 'Organize tickers',
             () => this._setEditMode(!this._editMode), this._editMode);
         // — sparkline window, its own section: the sidebar rows'
         // sparklines re-shape the moment the key lands (existing
