@@ -17,7 +17,8 @@
  */
 /* menu.js — the dropdown card. Plain JS class with an St.Widget actor
  * embedded via a PopupMenuSection (weatherglass ForecastPanel pattern):
- * header → hero price → animated chart + range chips → sparkline rows →
+ * header → hero price → animated chart + range chips → top-gainers and
+ * top-losers rows (click launches the app) →
  * footer. Series data arrives from extension.js; this file only renders. */
 
 import Clutter from 'gi://Clutter';
@@ -353,47 +354,77 @@ export class TickerPanel {
             .format(t.getHours(), t.getMinutes()));
     }
 
+    /* movers-first card: the active list's five biggest gainers (best
+     * on top) then five biggest losers (worst on top). Every row is a
+     * jump-off — a click hands the symbol to extension.js, which
+     * points the app at the watchlist containing it and raises the
+     * window; the hero/chart above stays the extension's own preview */
     _buildRows(state) {
         this._rows.destroy_all_children();
-        for (const q of state.quotes) {
-            const sel = q.symbol === state.hero;
-            const btn = new St.Button({style_class: 'tg-row' +
-                                        (sel ? ' tg-row-sel' : ''),
-                                       can_focus: true});
-            const box = row();
-            box.add_child(new MiniSpark(q.spark, (q.change ?? 0) >= 0));
-            const sbox = col('tg-row-symcol');
-            sbox.add_child(label(q.symbol.replace(/^\^/, ''), 'tg-row-sym'));
-            const nm = (q.name ?? '').replace(/[\u2018\u2019'].*/g, '')
-                .replace(/(Common|Corp|Inc|Holdings|Group|Plc|Ltd|Co)\.?$/i, '')
-                .trim();
-            const nameL = label(nm.length > 20 ? nm.slice(0, 19) + '…' : nm,
-                                'tg-row-name');
-            sbox.add_child(nameL);
-            box.add_child(sbox);
-            box.add_child(spacer());
-            const pbox = new St.BoxLayout({vertical: true,
-                                           x_align: Clutter.ActorAlign.END});
-            pbox.add_child(new St.Label({
-                text: q.price != null ? fmtPrice(q.price, q.currency) : '—',
-                style_class: 'tg-row-price',
-                x_align: Clutter.ActorAlign.END}));
-            if (q.change != null) {
-                const pl = new St.Label({
-                    text: `${q.change >= 0 ? '▲' : '▼'} ${fmtPct(q.changePct)}`,
-                    style_class: 'tg-row-chg ' +
-                        (q.change >= 0 ? 'tg-up' : 'tg-down'),
-                    x_align: Clutter.ActorAlign.END});
-                pbox.add_child(pl);
-            }
-            box.add_child(pbox);
-            btn.set_child(box);
-            btn.connect('clicked', () => {
-                if (q.symbol !== state.hero)
-                    this.onSelect?.(q.symbol);
-            });
-            this._rows.add_child(btn);
+        const qs = state.quotes.filter(q => q.price != null &&
+            q.changePct != null);
+        const g = qs.filter(q => q.changePct > 0)
+            .sort((a, b) => b.changePct - a.changePct).slice(0, 5);
+        const l = qs.filter(q => q.changePct < 0)
+            .sort((a, b) => a.changePct - b.changePct).slice(0, 5);
+        if (!g.length && !l.length) {
+            this._rows.add_child(label(
+                qs.length ? _('Nothing moved today — every symbol flat')
+                         : _('Waiting for the first quote round…'),
+                'tg-nomove'));
+            return;
         }
+        const section = (text, cls) => {
+            const lbl = label(text, 'tg-sec-h');
+            lbl.add_style_class_name(cls);
+            this._rows.add_child(lbl);
+        };
+        if (g.length) {
+            section(_('▲  Top gainers'), 'tg-sec-up');
+            for (const q of g)
+                this._rows.add_child(this._mkRow(q, q.symbol === state.hero));
+        }
+        if (l.length) {
+            section(_('▼  Top losers'), 'tg-sec-down');
+            for (const q of l)
+                this._rows.add_child(this._mkRow(q, q.symbol === state.hero));
+        }
+    }
+
+    _mkRow(q, selected) {
+        const btn = new St.Button({style_class: 'tg-row' +
+                                    (selected ? ' tg-row-sel' : ''),
+                                   can_focus: true});
+        const box = row();
+        box.add_child(new MiniSpark(q.spark, (q.change ?? 0) >= 0));
+        const sbox = col('tg-row-symcol');
+        sbox.add_child(label(q.symbol.replace(/^\^/, ''), 'tg-row-sym'));
+        const nm = (q.name ?? '').replace(/[\u2018\u2019'].*/g, '')
+            .replace(/(Common|Corp|Inc|Holdings|Group|Plc|Ltd|Co)\.?$/i, '')
+            .trim();
+        const nameL = label(nm.length > 20 ? nm.slice(0, 19) + '…' : nm,
+                            'tg-row-name');
+        sbox.add_child(nameL);
+        box.add_child(sbox);
+        box.add_child(spacer());
+        const pbox = new St.BoxLayout({vertical: true,
+                                       x_align: Clutter.ActorAlign.END});
+        pbox.add_child(new St.Label({
+            text: q.price != null ? fmtPrice(q.price, q.currency) : '—',
+            style_class: 'tg-row-price',
+            x_align: Clutter.ActorAlign.END}));
+        if (q.change != null) {
+            const pl = new St.Label({
+                text: `${q.change >= 0 ? '▲' : '▼'} ${fmtPct(q.changePct)}`,
+                style_class: 'tg-row-chg ' +
+                    (q.change >= 0 ? 'tg-up' : 'tg-down'),
+                x_align: Clutter.ActorAlign.END});
+            pbox.add_child(pl);
+        }
+        box.add_child(pbox);
+        btn.set_child(box);
+        btn.connect('clicked', () => this.onOpenSym?.(q.symbol));
+        return btn;
     }
 
     /** extension.js hands over history for hero+range (or null on failure) */

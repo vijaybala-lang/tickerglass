@@ -15,19 +15,17 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-/* extension.js — panel LED movers-tape button, timers, settings glue.
- * Conventions inherited from weatherglass/extension.js: PanelMenu.Button
- * subclass, gsettings-driven everything, monotonic timers with 0 sentinels,
- * _busy/_refetch/_dead async guards, stale data kept on failure. */
+/* extension.js — panel gainers/losers counter button, timers, settings
+ * glue. Conventions inherited from weatherglass/extension.js:
+ * PanelMenu.Button subclass, gsettings-driven everything, monotonic timers
+ * with 0 sentinels, _busy/_refetch/_dead async guards, stale data kept on
+ * failure. */
 
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 import GObject from 'gi://GObject';
 import St from 'gi://St';
-import Cairo from 'gi://cairo';
-import Pango from 'gi://Pango';
-import PangoCairo from 'gi://PangoCairo';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
@@ -38,171 +36,9 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {MarketClient} from './yahoo.js';
 import {TickerPanel} from './menu.js';
 import {initI18n, _} from './i18n.js';
-import {parseWatchlists, fmtPrice, fmtDelta, fmtPct} from './fmt.js';
+import {parseWatchlists} from './fmt.js';
 
-const FRAME_MS = 50;          // 20 fps, same budget as weatherglass icons
-const TAPE_SPEED = 55;        // px/s — airport-board pace, right to left
-
-/* LED-matrix palette: saturated phosphor greens/reds on a near-black
- * board; the dim color is the separator dots and the idle legend */
-const LED = {
-    up: [0.24, 1.00, 0.55],
-    down: [1.00, 0.36, 0.42],
-    dim: [0.55, 0.60, 0.58],
-};
-
-/* ── the scrolling LED tape ────────────────────────────────────────────────
- * St.DrawingArea + PangoCairo. The stream is a list of colored runs
- * (monospace bold, the LED-board face); each frame advances a byte-
- * precise offset and the strip is painted at x, x+W, x+2W… so the seam
- * where it wraps is invisible — provided every run ends padded, which
- * the caller (extension.js _renderTape) guarantees. 20 fps at 55 px/s
- * is ~3 px/frame: smoother than the real thing. */
-const MoversTape = GObject.registerClass(
-class MoversTape extends St.DrawingArea {
-    _init() {
-        super._init({style_class: 'tg-tape', reactive: false,
-                     can_focus: false,
-                     y_align: Clutter.ActorAlign.CENTER,
-                     width: 300, height: 20});
-        this._runs = [];           // [{lay, wpx, rgb}] — built lazily
-        this._stripW = 0;
-        this._off = 0;
-        this._last = GLib.get_monotonic_time();
-        this._pending = null;      // items awaiting a paint-context
-        this._idleText = '';
-        this._idleLay = null;
-        this._dirty = false;
-        this._clockId = 0;
-        this.connect('destroy', () => this._stop());
-        this._start();
-    }
-
-    /** items: [{text, rgb}] — painted in order, scrolling as one strip.
-     *  Pango layouts cannot be conjured outside a cairo context in this
-     *  GJS (new Pango.Layout(ctx) throws — fresh-login crash proved it),
-     *  so the set is parked here and realized on the next repaint */
-    setItems(items) {
-        this._pending = (items ?? []).filter(it => it?.text);
-        this._idleText = '';
-        this._idleLay = null;
-        this._runs = [];
-        this._stripW = 0;
-        this._off = 0;
-        this._dirty = true;
-        this.queue_repaint();
-    }
-
-    setIdle(text) {
-        this._pending = null;
-        this._idleText = text ?? '';
-        this._idleLay = null;      // realized on paint, like the runs
-        this._runs = [];
-        this._stripW = 0;
-        this._dirty = true;
-        this.queue_repaint();
-    }
-
-    _mkLayout(cr, text, font) {
-        const lay = PangoCairo.create_layout(cr);
-        // NO desc.free(): GJS reclaims FontDescription — an explicit
-        // free double-frees at teardown (unit-proven: 'free():
-        // invalid pointer' at exit)
-        const desc = Pango.FontDescription.from_string(font);
-        lay.set_font_description(desc);
-        lay.set_text(text, -1);
-        return lay;
-    }
-
-    _realize(cr) {
-        this._dirty = false;
-        if (this._pending) {
-            for (const it of this._pending) {
-                const lay = this._mkLayout(cr, it.text, 'Monospace Bold 10');
-                const [wp] = lay.get_pixel_size();
-                this._runs.push({lay, wp, rgb: it.rgb ?? LED.dim});
-                this._stripW += wp;
-            }
-            // a strip narrower than the window would smear the seam;
-            // double the set (same layout objects — painting is
-            // read-only) so the tiling loop always has material
-            if (this._runs.length && this._stripW < 300) {
-                for (const r of [...this._runs]) {
-                    this._runs.push(r);
-                    this._stripW += r.wp;
-                }
-            }
-            this._pending = null;
-        } else if (this._idleText) {
-            this._idleLay = this._mkLayout(cr, this._idleText,
-                'Monospace 10');
-        }
-    }
-
-    vfunc_repaint() {
-        let [w, h] = this.get_surface_size();
-        if (w <= 0 || h <= 0)
-            return;
-        const cr = this.get_context();
-        cr.setOperator(Cairo.Operator.CLEAR);
-        cr.paint();
-        cr.setOperator(Cairo.Operator.OVER);
-        if (this._dirty)
-            this._realize(cr);
-
-        if (!this._runs.length) {
-            if (this._idleLay) {
-                const [lw, lh] = this._idleLay.get_pixel_size();
-                cr.setSourceRGBA(...LED.dim, 0.85);
-                cr.moveTo(Math.max(6, (w - lw) / 2), (h - lh) / 2);
-                PangoCairo.show_layout(cr, this._idleLay);
-            }
-            return;
-        }
-
-        let y = (h - this._runs[0].lay.get_pixel_size()[1]) / 2;
-        // draw at -off mod W, then tile rightward past the viewport
-        let x = -(this._off % this._stripW);
-        if (x > 0)
-            x -= this._stripW;
-        for (; x < w; x += this._stripW) {
-            let cx = x;
-            for (const r of this._runs) {
-                cr.setSourceRGBA(...r.rgb, 1);
-                cr.moveTo(cx, y);
-                PangoCairo.show_layout(cr, r.lay);
-                cr.newPath();
-                cx += r.wp;
-            }
-        }
-    }
-
-    _start() {
-        if (this._clockId)
-            return;
-        this._clockId = GLib.timeout_add(GLib.PRIORITY_LOW, FRAME_MS, () => {
-            if (this.mapped ?? true) {
-                const now = GLib.get_monotonic_time();
-                const dt = Math.min(0.25, (now - this._last) / 1e6);
-                this._last = now;
-                if (this._stripW) {
-                    this._off = (this._off + dt * TAPE_SPEED) % this._stripW;
-                    this.queue_repaint();
-                }
-            } else {
-                this._last = GLib.get_monotonic_time();
-            }
-            return GLib.SOURCE_CONTINUE;
-        });
-    }
-
-    _stop() {
-        if (this._clockId) {
-            GLib.source_remove(this._clockId);
-            this._clockId = 0;
-        }
-    }
-});
+const APP_DESKTOP_ID = 'dev.vijaybala.TickerGlass.desktop';
 
 /* ── the indicator ──────────────────────────────────────────────────────── */
 const TickerIndicator = GObject.registerClass(
@@ -219,12 +55,24 @@ class TickerIndicator extends PanelMenu.Button {
 
         this._dark = _interfaceIsDark();
 
-        // the panel IS the tape: the ACTIVE WATCHLIST's biggest gainers
-        // then losers, LED-board styled — same quotes the dropdown
-        // shows, so the board costs no extra network
-        this._tape = new MoversTape();
-        this._tape.setIdle('TICKERGLASS · waking up');
-        this.add_child(this._tape);
+        // the panel is a scoreboard: how many of the active watchlist's
+        // symbols are up and how many are down — same quotes the
+        // dropdown shows, zero extra network
+        this._box = new St.BoxLayout({style_class: 'tg-panel-box',
+                                      y_align: Clutter.ActorAlign.CENTER});
+        this._gLbl = new St.Label({style_class: 'tg-gcnt tg-dim',
+                                   y_align: Clutter.ActorAlign.CENTER,
+                                   text: '▲ —'});
+        this._sepLbl = new St.Label({style_class: 'tg-sep',
+                                     y_align: Clutter.ActorAlign.CENTER,
+                                     text: '·'});
+        this._lLbl = new St.Label({style_class: 'tg-lcnt tg-dim',
+                                   y_align: Clutter.ActorAlign.CENTER,
+                                   text: '▼ —'});
+        this._box.add_child(this._gLbl);
+        this._box.add_child(this._sepLbl);
+        this._box.add_child(this._lLbl);
+        this.add_child(this._box);
 
         // dropdown card
         this._panel = new TickerPanel({
@@ -238,8 +86,9 @@ class TickerIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(section);
         this._panel.onRange = r =>
             this._settings.set_string('chart-range', r);
-        this._panel.onSelect = sym =>
-            this._settings.set_string('selected-symbol', sym);
+        // a mover row is a jump-off: point the app at the first
+        // watchlist containing that ticker, then bring its window up
+        this._panel.onOpenSym = sym => this._openInApp(sym);
         this.menu.actor.add_style_class_name('tg-menu');
         for (let a = this._panel.actor; a; a = a.get_parent()) {
             a.set_style('padding: 0px; margin: 0px; border-width: 0px;');
@@ -317,7 +166,7 @@ class TickerIndicator extends PanelMenu.Button {
                         return GLib.SOURCE_REMOVE;
                     });
             this._error = 'rate';
-            this._renderTape();
+            this._renderPanel();
             this._panel.render(this._state());
             return;
         }
@@ -325,7 +174,7 @@ class TickerIndicator extends PanelMenu.Button {
         if (!symbols.length) {
             this._quotes = [];
             this._error = 'empty';
-            this._renderTape();
+            this._renderPanel();
             this._panel.render(this._state());
             return;
         }
@@ -342,7 +191,7 @@ class TickerIndicator extends PanelMenu.Button {
                               !res.quotes.some(q => q.price != null)
                     ? 'fetch' : null;
                 this._busy = false;
-                this._renderTape();
+                this._renderPanel();
                 this._panel.render(this._state());
                 this._panel.ensureHero();
                 this._restartTimer();
@@ -357,51 +206,58 @@ class TickerIndicator extends PanelMenu.Button {
                 logError(e, 'TickerGlass');
                 this._error = /429|rate/.test(String(e)) ? 'rate' : 'fetch';
                 this._busy = false;
-                this._renderTape();
+                this._renderPanel();
                 this._panel.render(this._state());
                 this._restartTimer();
             });
     }
 
-    /* ── the tape's content: the watchlist's own movers ────────────────
-     * No extra network — the quote round that feeds the dropdown IS
-     * the feed: sort by the day's percent move, up-to-five above the
-     * line (brightest first) then up-to-five below (worst first). A
-     * list that's all-red simply streams no green section; the board
-     * reports what the watchlist actually did today */
+    /* ── the scoreboard: watchlist breadth ───────────────────────────────
+     * The quote round that feeds the dropdown IS the feed: one label
+     * counts symbols up on the day, the other counts them down. Flat
+     * (0.00%) names are counted by neither; before the first round the
+     * counters rest as dim dashes */
 
-    _renderTape() {
-        const qs = this._quotes.filter(q => q.price != null &&
-            q.changePct != null);
-        const g = qs.filter(q => q.changePct > 0)
-            .sort((a, b) => b.changePct - a.changePct).slice(0, 5);
-        const l = qs.filter(q => q.changePct < 0)
-            .sort((a, b) => a.changePct - b.changePct).slice(0, 5);
-        if (!g.length && !l.length) {
-            this._tape.setIdle(this._error === 'rate'
-                ? 'TICKERGLASS · feed rate-limited, retrying'
-                : this._error === 'empty'
-                    ? 'TICKERGLASS · no symbols — configure in ⚙'
-                    : qs.length
-                        ? 'TICKERGLASS · watchlist flatlined (0.00%)'
-                        : 'TICKERGLASS · waiting for the feed');
-            return;
-        }
-        const segs = [];
-        const push = (arr, up) => {
-            for (const m of arr) {
-                segs.push({
-                    text: `${m.symbol.replace(/^\^/, '')}  ` +
-                        `${fmtPrice(m.price, m.currency)}  ` +
-                        `${up ? '▲' : '▼'}${fmtPct(Math.abs(m.changePct ?? 0))}   `,
-                    rgb: up ? LED.up : LED.down,
-                });
-                segs.push({text: '·   ', rgb: LED.dim});
+    _renderPanel() {
+        const qs = this._quotes.filter(q => q.changePct != null);
+        const g = qs.filter(q => q.changePct > 0).length;
+        const l = qs.filter(q => q.changePct < 0).length;
+        const live = qs.length > 0;
+        this._gLbl.set_text(live ? `▲ ${g}` : '▲ —');
+        this._lLbl.set_text(live ? `▼ ${l}` : '▼ —');
+        this._gLbl.toggle_style_class_name('tg-dim', !live);
+        this._lLbl.toggle_style_class_name('tg-dim', !live);
+        this._sepLbl.toggle_style_class_name('tg-dim', !live);
+    }
+
+    /* hand a symbol to the desktop app: activate the first watchlist
+     * (in the user's list order) that contains it, select it, then
+     * launch — GApplication forwards the activate to a running
+     * instance, so this focuses the window instead of doubling it.
+     * The app watches both settings keys, so a running instance
+     * re-points itself without a restart */
+    _openInApp(sym) {
+        const lists = parseWatchlists(this._settings.get_string('watchlists'));
+        const wl = lists.find(w => (w.symbols ?? []).includes(sym));
+        if (wl && this._settings.get_string('active-watchlist') !== wl.id)
+            this._settings.set_string('active-watchlist', wl.id);
+        this._settings.set_string('selected-symbol', sym);
+        try {
+            const info = Gio.AppInfo.get_all().find(
+                a => a.get_id() === APP_DESKTOP_ID);
+            if (info) {
+                info.launch(null, null);
+                return;
             }
-        };
-        push(g, true);
-        push(l, false);
-        this._tape.setItems(segs);
+        } catch (e) {
+            logError(e, 'TickerGlass');
+        }
+        // no desktop entry (dev checkout?): ask gjs directly — a
+        // secondary GApplication instance still wakes the primary
+        Gio.Subprocess.new(
+            ['gjs', '-m', GLib.build_filenamev([GLib.get_home_dir(),
+                '.local', 'share', 'tickerglass', 'main.js'])],
+            Gio.SubprocessFlags.NONE);
     }
 
     async _loadHero(symbol, range) {

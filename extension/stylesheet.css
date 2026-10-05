@@ -19,18 +19,19 @@
  * tg- prefixed, glass fills over the popup, hierarchy via font-weight not
  * opacity, double-declaration accent fallback. */
 
-/* ── panel: the LED movers tape ─────────────────────────────────────────
- * The glyphs are painted by PangoCairo (colors live in extension.js —
- * CSS can't reach cairo ink), so the stylesheet's whole job is the
- * BOARD: a near-black inset bezel with a phosphor-tinted hairline,
- * like a slab of LED matrix bolted into the top bar. */
-.tg-tape {
-    background-color: rgba(3, 8, 6, 0.92);
-    border: 1px solid rgba(0, 255, 150, 0.16);
-    border-radius: 4px;
-    padding: 1px 8px;
-    margin: 0 4px;
+/* ── panel: the breadth scoreboard ──────────────────────────────────────
+ * Two counts with a dot between them: green ▲ up-count, red ▼ down-
+ * count for the active watchlist. tg-dim is the resting state before
+ * the first quote round lands. */
+.tg-panel-box {
+    spacing: 6px;
+    padding: 0 6px;
+    font-weight: 700;
 }
+.tg-panel-box .tg-gcnt { color: #2eff8f; }
+.tg-panel-box .tg-lcnt { color: #ff5c6c; }
+.tg-panel-box .tg-sep  { color: rgba(255, 255, 255, 0.30); }
+.tg-panel-box .tg-dim  { color: rgba(255, 255, 255, 0.35); }
 
 /* ── popup chrome ───────────────────────────────────────────────────────── */
 /* compound selector outranks the theme's popup padding (weatherglass trick) */
@@ -91,6 +92,16 @@
 
 /* ── symbol rows ────────────────────────────────────────────────────────── */
 .tg-rows { padding: 4px 8px 2px; spacing: 1px; }
+/* ── movers sections ────────────────────────────────────────────────────
+ * small colored headers above the two row blocks; the rows themselves
+ * wear .tg-row and get hover/press feedback — they launch the app */
+.tg-sec-h { font-size: 0.78em; font-weight: 700; letter-spacing: 0.06em;
+            padding: 8px 14px 2px; }
+.tg-sec-up { color: #46d98b; }
+.tg-sec-down { color: #ff7a80; }
+.tg-nomove { color: rgba(255, 255, 255, 0.45); font-size: 0.85em;
+             padding: 10px 14px; }
+
 .tg-row { border-radius: 12px; padding: 0; border: 1px solid transparent;
           background-color: transparent; }
 .tg-row:hover { background-color: rgba(255, 255, 255, 0.09); }
