@@ -494,7 +494,7 @@ class TickerWindow extends Adw.ApplicationWindow {
             const addImg = new Gtk.Image({icon_name: 'list-add-symbolic'});
             addImg.set_pixel_size(14);
             inner.append(addImg);
-            inner.append(new Gtk.Label({label: 'Add to Watchlist'}));
+            inner.append(new Gtk.Label({label: 'Add to List'}));
             // caret zone lives INSIDE the single button: one border,
             // one radius, one height — two welded widgets could never
             // stop drifting by a pixel

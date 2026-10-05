@@ -131,52 +131,19 @@ window { font-family: Inter, Cantarell, sans-serif; }
 /* the preview's commit button: green pill on the badge line, sized to
  * sit with the range chips instead of towering over the price */
 .tg-add {
-  /* follows the user's OS accent via main.js's tg-accent mirror token
-     (NOT @accent_bg_color — this app redefines that to brand green);
-     the gradient is a white-highlight / black-shade SHEEN layered over
-     it, since GTK4 CSS cannot lighten/darken — any accent keeps the
-     same glossy depth */
-  background-color: @tg-accent;
-  background-image: linear-gradient(180deg,
-      alpha(#ffffff, 0.20) 0%,
-      alpha(#ffffff, 0.03) 52%,
-      alpha(#000000, 0.16) 100%);
-  color: @tg-accent-fg;
-  border: 1px solid alpha(#000000, 0.28);
-  border-radius: 8px;   /* between crisp and soft */
-  padding: 7px 14px;
+  /* sidebar button-bar style: theme-default chrome (the .linked
+   * cluster look), no accent skin. Only custom values are the
+   * vertical padding — trimmed to sit in the hero chip row — and
+   * the label voice shared with the nav cluster */
+  padding: 2px 12px;
   font-size: 0.85em;
-  font-weight: 700;
-  min-height: 0;
-  min-width: 0;
-  box-shadow: inset 0 1px 0 alpha(#ffffff, 0.25);
-  min-height: 0;
-  box-shadow: none;
-}
-.tg-add:hover {
-  background-image: linear-gradient(180deg,
-      alpha(#ffffff, 0.28) 0%,
-      alpha(#ffffff, 0.10) 52%,
-      alpha(#000000, 0.10) 100%);
-}
-.tg-add:active {
-  background-image: linear-gradient(180deg,
-      alpha(#000000, 0.10) 0%,
-      alpha(#000000, 0.22) 100%);
-  box-shadow: none;
-}
-.tg-add image, .tg-add label { color: @tg-accent-fg; }
-/* no focus ring on click — GTK CSS does not parse the `outline: none`
- * shorthand (web syntax); outline-width/colour must be set explicitly */
-.tg-add:focus, .tg-add:focus-visible, .tg-add:checked {
-  outline-width: 0;
-  outline-color: transparent;
-  box-shadow: inset 0 1px 0 alpha(#ffffff, 0.25);
+  font-weight: 600;
 }
 /* hairline separator inside the single add-button: divides the add zone
- * from the caret zone (clicks are routed by position, not by widget) */
+ * from the caret zone (clicks are routed by position, not by widget);
+ * currentColor so it works on the default button in either theme */
 .tg-add-sep {
-  background: alpha(#ffffff, 0.35);
+  background: alpha(currentColor, 0.25);
   min-width: 1px;
   margin: 3px 0;
 }
