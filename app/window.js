@@ -3960,14 +3960,38 @@ class TickerWindow extends Adw.ApplicationWindow {
             return;
         }
         const intraday = INTRADAY.has(hist.range);
+        // ── live tail ──
+        // the hero price IS the last trade (quote endpoint), while the
+        // intraday series can lag it badly — probe: Nasdaq's 1m feed
+        // on a quiet name stopped 4h ago and still said the day was
+        // red while the tape and pill printed green. The line must end
+        // at the number the header shows, so stitch the live quote on
+        // as a final point when the bars lag (multi-day ranges too:
+        // their last point is still today's session)
+        let pts = hist.points;
+        const tailQ = this._quotes.find(x => x.symbol === hist.symbol)
+            ?? (this._previewQ?.symbol === hist.symbol
+                ? this._previewQ : null);
+        const tNow = GLib.get_real_time() / 1e6;
+        const tLast = pts[pts.length - 1].t;
+        // on daily ranges only splice when the last bar is TODAY's
+        // session — on weekends/overnights the official close is the
+        // truth and needs no tail
+        const today0 = new Date().setHours(0, 0, 0, 0) / 1000;
+        if (tailQ?.price != null && hist.symbol === this._hero() &&
+                tNow - tLast > 90 &&
+                (intraday || tLast >= today0) &&
+                tailQ.price !== pts[pts.length - 1].c)
+            pts = pts.concat([{t: Math.max(tNow, tLast + 1),
+                               c: tailQ.price}]);
         // rescale the benchmark into the primary's price space so both
         // lines share their first point (0% move) and the y-axis stays
         // honest in the hero's own currency
         let cmp = null;
         const cp = this._cmpHist?.range === hist.range
             ? this._cmpHist.points : null;
-        if (cp?.length > 1 && hist.points[0]?.c && cp[0].c) {
-            const p0 = hist.points[0].c, c0 = cp[0].c;
+        if (cp?.length > 1 && pts[0]?.c && cp[0].c) {
+            const p0 = pts[0].c, c0 = cp[0].c;
             cmp = {
                 points: cp.map(p => ({t: p.t, c: p0 * (p.c / c0)})),
                 // the gutter pill shows the benchmark's own price, not
@@ -3977,8 +4001,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         }
         const xlab = t => intraday
             ? fmtTime(t, hist.meta.tz)
-            : axisDate(t, (hist.points[hist.points.length - 1].t -
-                           hist.points[0].t) / 86400);
+            : axisDate(t, (pts[pts.length - 1].t - pts[0].t) / 86400);
         // two stacked area gradients read as mud: while a benchmark is
         // overlaid, the primary renders as a line regardless of the
         // saved style (the preference itself is untouched)
@@ -3991,13 +4014,13 @@ class TickerWindow extends Adw.ApplicationWindow {
         // shapes. paintChart tints the pills with each series' color.
         const cmpSym = this._settings.get_string('compare-symbol');
         const cursorFmt = (cmp && cmpSym) ? i => {
-            const n0 = hist.points.length - 1;
-            const p = hist.points[Math.max(0, Math.min(n0, i))];
+            const n0 = pts.length - 1;
+            const p = pts[Math.max(0, Math.min(n0, i))];
             const j = Math.round(i / n0 * (cp.length - 1));
             const c = cp[Math.max(0, Math.min(cp.length - 1, j))];
             const cur = hist.meta.currency;
             const hBase = hist.range === '1d' && hist.meta.prevClose
-                ? hist.meta.prevClose : hist.points[0].c;
+                ? hist.meta.prevClose : pts[0].c;
             const seg = (sym, price, frac) => `${sym} ` +
                 `${fmtPrice(price, cur)} ` +
                 `${frac >= 0 ? '\u25B2' : '\u25BC'}${fmtPct(Math.abs(frac))}`;
@@ -4013,7 +4036,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         } : null;
         paintChart(cr, {
             w, h,
-            points: hist.points,
+            points: pts,
             mode,
             prevClose: hist.range === '1d' ? hist.meta.prevClose : null,
             dark: this._styleManager?.get_dark() ?? true,
@@ -4117,7 +4140,9 @@ class TickerWindow extends Adw.ApplicationWindow {
             const base = day
                 ? (hist.meta?.prevClose ?? q.prevClose ?? pts[0].c)
                 : pts[0].c;
-            const last = day && q.price != null
+            // intraday windows end NOW: price the move off the live
+            // quote, matching the chart's live tail (see _drawChart)
+            const last = INTRADAY.has(hist.range) && q.price != null
                 ? q.price : pts[pts.length - 1].c;
             if (base) {
                 chg = last - base;
