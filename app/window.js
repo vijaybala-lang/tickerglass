@@ -354,7 +354,8 @@ class TickerWindow extends Adw.ApplicationWindow {
     _buildUi() {
         const hbar = new Adw.HeaderBar();
         // Adw.HeaderBar paints the window title centered when its title
-        // slot is untouched — feed it an empty box to evict the app name
+        // slot is untouched — park an empty box here to evict the app
+        // name; the nav cluster takes the slot (and the center) below
         hbar.title_widget = new Gtk.Box();
         this.set_title('TickerGlass');
         const sideBtn = new Gtk.ToggleButton({icon_name: 'sidebar-show-symbolic',
@@ -371,12 +372,14 @@ class TickerWindow extends Adw.ApplicationWindow {
         // candidates drop down, click to preview — never leaves the page
         const search = new Gtk.SearchEntry({
             placeholder_text: 'Search symbol or company  ( / )',
-            width_chars: 22, max_width_chars: 30, valign: Gtk.Align.CENTER,
+            width_chars: 15, max_width_chars: 20, valign: Gtk.Align.CENTER,
         });
         hbar.pack_end(search);
         this._searchEntry = search;
         this._buildSearchPopover(search);
-        // page navigation right beside the search: Watchlist ↔ Movers.
+        // page navigation in the bar's dead center: the title slot is
+        // the one place GtkHeaderBar centers, and the cluster still
+        // rides the reader-chrome visibility loop.
         // Icon + label nav (.tg-tab): the movers glyph is the app's
         // own up/down triangle pair, shipped as a symbolic next to
         // the code so it recolors like stock icons — the adwaita set
@@ -422,7 +425,7 @@ class TickerWindow extends Adw.ApplicationWindow {
             navBox.append(b);
             this._navChips[key] = b;
         }
-        hbar.pack_end(navBox);
+        hbar.set_title_widget(navBox);
         this._navBox = navBox;
         if (GLib.getenv('TG_DEBUGKEYS')) {
             const mk = (name, wid) => {
