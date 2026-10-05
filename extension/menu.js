@@ -46,7 +46,7 @@ const INK_DOWN = [1.00, 0.36, 0.42];
 /* one instance of the app's shared triangle asset (paintTri), sized for
  * the top bar; dim is the resting state before the first quote round.
  * Used by the panel scoreboard (extension.js) and every movers row. */
-const Tri = GObject.registerClass(
+export const Tri = GObject.registerClass(
 class Tri extends St.DrawingArea {
     _init(up, size = 11) {
         super._init({width: size, height: Math.round(size * 0.9),

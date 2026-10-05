@@ -54,6 +54,72 @@ try {
     bad++;
 }
 
+/* ── module-graph check: names, not just syntax ──────────────────────────
+ * Files that need the shell never fully import, so a missing `export`
+ * (the Tri incident: extension.js asked menu.js for a const it never
+ * exported) stays invisible until the panel dies at login. Statically
+ * verify every relative named import against the target's export list. */
+import GLib from 'gi://GLib';
+import Gio from 'gi://Gio';
+/* import specifiers resolve against THIS file; Gio.File resolves against
+ * CWD — anchor explicitly or every read silently misses (a no-op check
+ * is how a missing export walked into a login cycle once already).
+ * GFile lives under Gio in GJS, not GLib. */
+const HERE = GLib.path_get_dirname(decodeURIComponent(
+    import.meta.url.replace(/^file:\/\//, '')));
+const abs = p => GLib.build_filenamev([HERE, p]);
+const read = p => Gio.File.new_for_path(abs(p))
+    .load_contents(null)[1].toString();
+const exportsOf = new Map();
+const findExports = path => {
+    if (exportsOf.has(path))
+        return exportsOf.get(path);
+    const set = new Set();
+    try {
+        const src = read(path);
+        for (const m of src.matchAll(
+            /export\s+(?:async\s+)?(?:default\s+)?(?:class|function|const|let|var)\s+([A-Za-z_$][\w$]*)/g))
+            set.add(m[1]);
+        for (const m of src.matchAll(/export\s*\{([^}]*)\}/g))
+            for (const part of m[1].split(',')) {
+                const t = part.trim();
+                if (t)
+                    set.add(t.includes(' as ') ? t.split(/\s+as\s+/)[1] : t);
+            }
+        if (/export\s+default/.test(src))
+            set.add('default');
+    } catch {
+        /* unreadable file — the import phase above already reports it */
+    }
+    exportsOf.set(path, set);
+    return set;
+};
+for (const path of [...files.map(f => `${DIST}/${f}`),
+                    '../dist/app/window.js']) {
+    let src;
+    try {
+        src = read(path);
+    } catch (e) {
+        console.log(`FAIL  graph: cannot read ${path}: ${e.message}`);
+        bad++;
+        continue;
+    }
+    for (const m of src.matchAll(
+        /import\s*\{([^}]+)\}\s*from\s*['"](\.[^'"]+)['"]/g)) {
+        const target = `${GLib.path_get_dirname(path)}/${m[2]}`;
+        const have = findExports(target);
+        for (const part of m[1].split(',')) {
+            const name = part.trim().split(/\s+as\s+/)[0];
+            if (name && !have.has(name)) {
+                console.log(`FAIL  ${path}: '${m[2]}' doesn't export ` +
+                            `'${name}'`);
+                bad++;
+            }
+        }
+    }
+}
+console.log('ok    module graph: every relative named import resolves');
+
 if (bad)
     throw new Error(`${bad} file(s) failed`);
 console.log('\nsyntax clean ✓');
