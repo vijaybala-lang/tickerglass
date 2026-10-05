@@ -424,13 +424,33 @@ class TickerWindow extends Adw.ApplicationWindow {
             navBox.append(b);
             this._navChips[key] = b;
         }
-        // centering against the MAIN PANEL, not the bar: the cluster
-        // is positioned in JS against the stack's real center (see
-        // _positionNav), so opening or resizing the sidebar can never
-        // pull it off the panel it labels. (Title-slot and hexpand
-        // spacer attempts both centered against headerbar internals:
-        // probe-measured 18px drift once the sidebar opened.)
+        // centering, the measured kind: the cluster rides the title
+        // slot (the only center-placed position in Adw.HeaderBar) and
+        // a phantom spacer in the start group is sized so the start
+        // and end groups come out EQUAL — balanced groups make the
+        // title's window-center also the center of the gap between
+        // the sidebar button and the search entry. (An hexpand spacer
+        // in the start group was tried: GtkHeaderBar's internal boxes
+        // ignore hexpand — probe-verified, navmid stayed exactly the
+        // cluster's width.)
+        const navPhantom = new Gtk.Box();
+        hbar.pack_start(navPhantom);
+        hbar.set_title_widget(navBox);
         this._navBox = navBox;
+        this._navPhantom = navPhantom;
+        // widths are stable (fixed width_chars / icon buttons), so a
+        // single measurement once allocations settle is all it takes
+        GLib.timeout_add_seconds(GLib.PRIORITY_LOW, 1, () => {
+            if (this._dead || !navPhantom.get_parent())
+                return GLib.SOURCE_REMOVE;
+            const startBox = sideBtn.get_parent();
+            const endBox = search.get_parent();
+            if (!startBox?.get_width() || !endBox?.get_width())
+                return GLib.SOURCE_CONTINUE;   // not allocated yet
+            const slack = endBox.get_width() - startBox.get_width();
+            navPhantom.set_size_request(Math.max(0, slack), -1);
+            return GLib.SOURCE_REMOVE;
+        });
         if (GLib.getenv('TG_DEBUGKEYS')) {
             const mk = (name, wid) => {
                 const kc = new Gtk.EventControllerKey();
@@ -466,15 +486,7 @@ class TickerWindow extends Adw.ApplicationWindow {
 
         /* —— content column —— */
         const content = new SnapshotBox({orientation: Gtk.Orientation.VERTICAL});
-        // the header rides an overlay: the nav cluster floats over it,
-        // placed by _positionNav against the main panel's center
-        const hOv = new Gtk.Overlay();
-        hOv.set_child(hbar);
-        hOv.add_overlay(navBox);
-        navBox.set_valign(Gtk.Align.CENTER);
-        navBox.set_halign(Gtk.Align.START);
-        this._navOv = hOv;
-        content.append(hOv);
+        content.append(hbar);
 
         // the window body stacks Chart (hero + chart + news), Table (the
         // sortable grid — now reached from the hamburger's View section)
@@ -974,9 +986,11 @@ class TickerWindow extends Adw.ApplicationWindow {
                 this._refreshTopNews();
             // the reader owns the whole pane: swap the ticker chrome out
             const reading = p === 'reader';
-            // the cluster rides the visibility loop from its overlay
-            // perch too — the bar's own chrome swap is untouched
-            for (const w of [sideBtn, menuBtn, search, navBox])
+            // the phantom bows out in reading mode too: an invisible
+            // wedge would push the start group's back pill away from
+            // the edge while the cluster it balances is hidden
+            for (const w of [sideBtn, menuBtn, search,
+                             navBox, this._navPhantom])
                 w.set_visible(!reading);
             if (reading)
                 this._searchPop?.popdown();
@@ -1234,7 +1248,6 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._sideIdle = GLib.idle_add(GLib.PRIORITY_HIGH_IDLE, () => {
                 this._sideIdle = 0;
                 this._applySidebarWidth();
-                this._positionNav();   // keep the cluster on panel-center
                 return GLib.SOURCE_REMOVE;
             });
         });
@@ -1244,7 +1257,6 @@ class TickerWindow extends Adw.ApplicationWindow {
                 this._sideIdle = 0;
             }
             this._applySidebarWidth();   // land exactly on the final px
-            this._positionNav();
             this._resizing = false;
             this._chart?.queue_draw();   // the one real paint, at rest
             this._settings.set_int('sidebar-width', this._sidePx);
@@ -1273,13 +1285,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         // the content's snapshot: a draw can only happen after
         // allocation, so it covers boot AND every window resize. The
         // unchanged-guard inside keeps it free on subsequent frames
-        content._onSnapshot = () => {
-            this._applySidebarWidth();
-            // and keep the nav cluster on the panel's live center:
-            // this fires on boot, every window resize, AND every frame
-            // of the sidebar's slide — the cluster tracks it live
-            this._positionNav();
-        };
+        content._onSnapshot = () => this._applySidebarWidth();
         sideBtn.bind_property('active', this._split, 'show_sidebar',
                               GObject.BindingFlags.BIDIRECTIONAL);
         // The preference tracks watchlist-page state only: Movers'
@@ -4185,24 +4191,6 @@ class TickerWindow extends Adw.ApplicationWindow {
      * GJS expands unknown "properties" into silent no-op JS fields.
      * Verified live: sidebar-width-FRACTION is real; the newer
      * sidebar-width-unit does not alter the math. */
-    /* place the nav cluster dead-center over the MAIN PANEL: measured
-     * against the stack's real extent in overlay coordinates, so the
-     * sidebar (open, closed, or mid-drag) never shifts the center —
-     * the panel's center is by definition the answer */
-    _positionNav() {
-        const nav = this._navBox, bar = this._navOv;
-        if (!nav || !bar || !this._stack || !nav.get_realized())
-            return;
-        const px = this._stack.translate_coordinates(bar, 0, 0);
-        const w = nav.get_width();
-        if (!px?.[0] || !w)
-            return;
-        const want = Math.max(0, Math.round(
-            px[1] + this._stack.get_width() / 2 - w / 2));
-        if (nav.get_margin_start() !== want)
-            nav.set_margin_start(want);
-    }
-
     _applySidebarWidth() {
         const total = this._split?.get_width() ?? 0;
         if (total < 1)                        // not allocated yet
