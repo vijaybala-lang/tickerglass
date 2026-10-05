@@ -1024,7 +1024,11 @@ export class NasdaqClient {
             price,
             prevClose: price != null && change != null ? price - change : null,
             change, changePct: pct != null ? pct / 100 : null,
-            dayHigh: dr[0] ?? null, dayLow: dr[1] ?? null,
+            // dayrange reads "low-high" like the 52W string (probe:
+            // dr[0]=111.53 was the LOW while dayLow field said 112.41 —
+            // the first cut here had the pair swapped and the chips
+            // rendered High below Low)
+            dayLow: dr[0] ?? null, dayHigh: dr[1] ?? null,
             open: null,
             volume: parseNum(p.volume),
             wk52High: wk[1] ?? null, wk52Low: wk[0] ?? null,
@@ -1055,7 +1059,8 @@ export class NasdaqClient {
             tz: 'America/New_York',
             marketTime: null,
             wk52High: wk[1] ?? null, wk52Low: wk[0] ?? null,
-            dayHigh: dr[0] ?? null, dayLow: dr[1] ?? null,
+            // "low-high" order, same correction as _quoteFrom
+            dayLow: dr[0] ?? null, dayHigh: dr[1] ?? null,
             open: null,
             volume: parseNum(p.volume),
             sessionStart: null, sessionEnd: null,

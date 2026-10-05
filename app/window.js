@@ -4105,13 +4105,24 @@ class TickerWindow extends Adw.ApplicationWindow {
         let chg = q.change ?? null, pct = q.changePct ?? null, tag = '';
         const pts = hist?.points;
         if (hist && hist.symbol === q.symbol && pts.length > 1) {
-            const base = hist.range === '1d'
-                ? (hist.meta?.prevClose ?? pts[0].c) : pts[0].c;
+            // the pill answers the VISIBLE window's move — but on 1D
+            // "day" means the trading day, so anchor at the previous
+            // close (the universal day-change baseline) rather than at
+            // the series' first point, which on Nasdaq includes
+            // midnight pre-market drift. And price the 1D move off the
+            // LIVE quote, not the last bar: intraday bars lag minutes
+            // — a stale bar once printed +0.089% while the honest day
+            // move was −0.52% (screenshot-proven)
+            const day = hist.range === '1d';
+            const base = day
+                ? (hist.meta?.prevClose ?? q.prevClose ?? pts[0].c)
+                : pts[0].c;
+            const last = day && q.price != null
+                ? q.price : pts[pts.length - 1].c;
             if (base) {
-                chg = pts[pts.length - 1].c - base;
+                chg = last - base;
                 pct = chg / base;
-                tag = hist.range === '1d'
-                    ? '' : (RANGE_LABEL[hist.range] ?? '');
+                tag = day ? '' : (RANGE_LABEL[hist.range] ?? '');
             }
         }
         const up = (chg ?? 0) >= 0;
