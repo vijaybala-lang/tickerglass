@@ -883,19 +883,44 @@ class TickerWindow extends Adw.ApplicationWindow {
             vexpand: true, hscrollbar_policy: Gtk.PolicyType.NEVER,
             margin_top: 4,
         });
+        // two newspaper columns, column-major (newest runs the left
+        // column top-to-bottom, then the right). A second ListBox —
+        // not a FlowBox — so the pill skin (.tg-news-list row) applies
+        // untouched; FlowBox children are flowchild nodes the movers
+        // tile CSS needed a small campaign to tame.
+        const tnCols = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
+                                    spacing: 4});
         this._topNewsList = new Gtk.ListBox({css_classes: ['tg-news-list']});
         this._topNewsList.add_css_class('flat');
-        this._topNewsList.connect('row-activated', (l, row) => {
-            if (row?._url)
-                this._openReader(row._url, row._title);
-        });
+        this._topNewsList.set_hexpand(true);
+        this._topNewsList2 = new Gtk.ListBox({css_classes: ['tg-news-list']});
+        this._topNewsList2.add_css_class('flat');
+        this._topNewsList2.set_hexpand(true);
+        for (const l of [this._topNewsList, this._topNewsList2])
+            l.connect('row-activated', (lb, row) => {
+                if (row?._url)
+                    this._openReader(row._url, row._title);
+            });
+        tnCols.append(this._topNewsList);
+        tnCols.append(this._topNewsList2);
         this._topNewsEmpty = new Gtk.Label({label: 'Fetching top stories…',
                                             css_classes: ['dim-label'],
                                             margin_top: 12,
                                             margin_bottom: 12});
         this._topNewsList.set_placeholder(this._topNewsEmpty);
-        topNewsScroll.set_child(this._topNewsList);
+        topNewsScroll.set_child(tnCols);
         newsWrap.append(topNewsScroll);
+        // narrow window → honest one column: the hadjustment's upper
+        // tracks the viewport width (no resize signal on GtkWidget in
+        // GTK4), and the crossing point repaints the split
+        this._tnTwo = true;
+        topNewsScroll.get_hadjustment().connect('notify::upper', () => {
+            const two = topNewsScroll.get_hadjustment().upper >= 780;
+            if (two !== this._tnTwo) {
+                this._tnTwo = two;
+                this._refreshTopNews();   // paints only when on screen
+            }
+        });
 
         this._stack = new Gtk.Stack({
             vexpand: true, transition_type: Gtk.StackTransitionType.SLIDE_LEFT_RIGHT,
@@ -3044,17 +3069,26 @@ class TickerWindow extends Adw.ApplicationWindow {
     }
 
     _paintTopNews() {
-        const list = this._topNewsList;
-        if (!list)
+        const left = this._topNewsList, right = this._topNewsList2;
+        if (!left)
             return;
-        for (let r = list.get_first_child(); r;) {
-            const next = r.get_next_sibling();
-            list.remove(r);
-            r = next;
+        for (const l of [left, right]) {
+            for (let r = l.get_first_child(); r;) {
+                const next = r.get_next_sibling();
+                l.remove(r);
+                r = next;
+            }
         }
         const tn = this._topNews;
-        for (const n of tn?.items ?? [])
-            list.append(this._mkNewsRow(n));
+        const items = tn?.items ?? [];
+        // column-major: the left column carries the freshest stories
+        const half = this._tnTwo ? Math.ceil(items.length / 2)
+            : items.length;
+        for (const n of items.slice(0, half))
+            left.append(this._mkNewsRow(n));
+        right.set_visible(this._tnTwo && items.length > half);
+        for (const n of items.slice(half))
+            right.append(this._mkNewsRow(n));
         this._topNewsSummary.set_text(
             tn?.items.length
                 ? `Yahoo Finance front feed · refreshed ${tn.at}`
