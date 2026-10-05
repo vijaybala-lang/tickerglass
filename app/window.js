@@ -932,7 +932,7 @@ class TickerWindow extends Adw.ApplicationWindow {
                                       margin_top: 8, spacing: 2});
         const newsTitleRow = new Gtk.Box({
             orientation: Gtk.Orientation.HORIZONTAL, spacing: 8});
-        this._topNewsTitle = new Gtk.Label({label: 'Top Stories', xalign: 0,
+        this._topNewsTitle = new Gtk.Label({label: 'Latest Stories', xalign: 0,
                                             css_classes: ['tg-page-title'],
                                             margin_start: 24,
                                             margin_bottom: 4});
@@ -1353,7 +1353,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         viewM.append('Chart', 'win.view::chart');
         viewM.append('Table', 'win.view::table');
         viewM.append('Movers', 'win.view::movers');
-        viewM.append('Top Stories', 'win.view::news');
+        viewM.append('Latest Stories', 'win.view::news');
         menu.append_section('View', viewM);
 
         const src = new Gio.Menu();
@@ -3104,9 +3104,13 @@ class TickerWindow extends Adw.ApplicationWindow {
             return;
         if (this._stack?.get_visible_child_name() === 'news') {
             const tn = this._topNews;
+            const cur = `news:top:${
+                (this._activeList()?.symbols ?? []).slice(0, 24).join(',')}`;
             const age = tn ? GLib.get_monotonic_time() / 1e6 - tn.stamp
                 : 1e9;
-            if (age > 120 && !this._tnBusy)
+            // a list switch makes even a seconds-old answer stale —
+            // it belongs to the OTHER watchlist
+            if ((tn?.key !== cur || age > 120) && !this._tnBusy)
                 this._loadTopNews();
             this._paintTopNews();
         }
@@ -3116,23 +3120,28 @@ class TickerWindow extends Adw.ApplicationWindow {
         if (this._tnBusy || this._dead)
             return;
         this._tnBusy = true;
+        // the feed follows the ACTIVE LIST (probe-verified: the
+        // multi-symbol headline feed is live to the minute; the old
+        // rssindex front feed is a September fossil) — the hub key
+        // rides the symbol set so a list switch refetches
+        const syms = (this._activeList()?.symbols ?? []).slice(0, 24);
+        const key = `news:top:${syms.join(',')}`;
         try {
-            // hub key: a storm of page-entries joins the one producer
-            // instead of re-pulling the feed
             const items = await this._fetcher.fetch(
-                'news:top', () => this._client.topNews(), {ttl: 120});
+                key, () => this._client.topNews(syms), {ttl: 120});
             if (this._dead)
                 return;
             const now = GLib.DateTime.new_now_local();
             log(`TickerGlass: top news ${items.length} stories`);
-            this._topNews = {items, at: now ? now.format('%H:%M') : '',
+            this._topNews = {items, key,
+                at: now ? now.format('%H:%M') : '',
                 stamp: GLib.get_monotonic_time() / 1e6};
         } catch (e) {
             log(`TickerGlass: top news failed: ${e.message}`);
-            // stamp the failure NOW (not 0): every table flush while
-            // the page is open would otherwise re-hit a dead feed
-            // round after round — back off like a normal answer did
-            this._topNews ??= {items: [], at: '',
+            // stamp the failure NOW (not 0) AND with the key: every
+            // table flush while the page is open would otherwise
+            // re-hit a dead feed round after round
+            this._topNews ??= {items: [], key, at: '',
                 stamp: GLib.get_monotonic_time() / 1e6};
         } finally {
             this._tnBusy = false;
@@ -3163,9 +3172,11 @@ class TickerWindow extends Adw.ApplicationWindow {
             right.append(this._mkNewsRow(n));
         this._topNewsSummary.set_text(
             tn?.items.length
-                ? `Yahoo Finance front feed · refreshed ${tn.at}`
+                ? `${this._activeList()?.symbols?.length
+                    ? 'Your watchlist · ' : 'Market bellwethers · '}updated ${
+                    tn.at}`
                 : tn ? 'News feed unreachable — try the Yahoo data source'
-                     : 'Fetching top stories…');
+                     : 'Fetching latest stories…');
         this._topNewsEmpty.set_text(tn?.items.length ? ''
             : tn ? 'The feed came back quiet' : 'Fetching…');
     }

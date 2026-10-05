@@ -451,17 +451,33 @@ export class YahooClient {
             });
     }
 
-    /** Market-wide top headlines: Yahoo Finance's own RSS front feed,
-     *  keyless and crumb-free. Same {title, source, url, at} shape the
-     *  per-symbol news() returns, so every news surface renders blind. */
-    async topNews() {
-        const body = await this._try('top news',
-            'https://finance.yahoo.com/news/rssindex', {json: false});
-        const items = parseRssItems(typeof body === 'string'
-            ? body : '');
+    /** Fresh headlines for a set of symbols — the keyless per-symbol
+     *  RSS feed accepts them comma-joined in ONE request (probe: 3
+     *  symbols → 18 stories). The old rssindex front feed is dead —
+     *  it has served the same September 24 items indefinitely; the
+     *  feeds.finance.yahoo.com headline feed is the live one. */
+    async topNews(symbols = []) {
+        const list = (symbols && symbols.length ? symbols
+            : ['^GSPC', '^DJI', '^IXIC', 'AAPL', 'MSFT', 'NVDA'])
+            .slice(0, 24);
+        const url = 'https://feeds.finance.yahoo.com/rss/2.0/headline?s=' +
+            list.map(s => encodeURIComponent(s)).join(',') +
+            '&region=US&lang=en-US';
+        // honest UA: on the feeds host the spoofed-browser one stalls
+        // the socket outright (probe-verified — 40s+ with Firefox UA,
+        // 0.4s honest). Same lesson the screener endpoint taught.
+        const body = await this._try('top news', url, {json: false,
+            deadline: 20,
+            ua: 'TickerGlass/1.0 (GNOME; tickerglass@vijaybala.dev)'});
+        const items = parseRssItems(typeof body === 'string' ? body : '');
         if (!items.length)
             throw new Error('top-news feed had no items');
-        return items;
+        // a multi-symbol pull repeats shared stories — first sighting
+        // wins (the feed orders items newest-first per symbol block)
+        const seen = new Set();
+        const uniq = items.filter(it => !seen.has(it.url) && seen.add(it.url));
+        // the feed groups items per symbol; interleave by recency
+        return uniq.sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
     }
 
     /** One richer look at a single symbol: quoteSummary's stats +
@@ -678,7 +694,7 @@ function parseRssItems(xml) {
     };
     const re = /<item>([\s\S]*?)<\/item>/g;
     let m;
-    while (out.length < 24 && (m = re.exec(xml))) {
+    while (out.length < 48 && (m = re.exec(xml))) {
         const title = grab(m[1], 'title'), url = grab(m[1], 'link');
         if (!title || !url)
             continue;
@@ -1204,8 +1220,8 @@ export class NasdaqClient {
     }
 
     /* ditto the top-news RSS front feed — keyless Yahoo-side too */
-    async topNews() {
-        return this._back.topNews();
+    async topNews(symbols) {
+        return this._back.topNews(symbols);
     }
 
     /* stats: Nasdaq's own summary endpoint answers keyless and
@@ -1328,15 +1344,16 @@ export class MarketClient {
         }
     }
 
-    /* top stories are an open RSS feed: give every source a direct
-     * shot first — reader relays mangle XML into prose (news() rides
-     * the relay because per-symbol news comes back inside JSON, but
-     * raw RSS must not), and the impl path is the clean-IP fallback */
-    async topNews() {
+    /* top stories are RSS — the one payload a reader relay cannot
+     * carry (markdown/text/html/raw all strip XML — probe-verified).
+     * Direct Yahoo with the honest UA is the only real path; the
+     * impl stays a harmless last shot for sources that proxy RSS
+     * natively someday. */
+    async topNews(symbols) {
         this._newsDir ??= new YahooClient();
         for (const c of [this._newsDir, this._impl]) {
             try {
-                const items = c.topNews ? await c.topNews() : null;
+                const items = c.topNews ? await c.topNews(symbols) : null;
                 if (items?.length)
                     return items;
             } catch { /* next shot */ }
