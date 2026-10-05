@@ -424,33 +424,19 @@ class TickerWindow extends Adw.ApplicationWindow {
             navBox.append(b);
             this._navChips[key] = b;
         }
-        // centering, the measured kind: the cluster rides the title
-        // slot (the only center-placed position in Adw.HeaderBar) and
-        // a phantom spacer in the start group is sized so the start
-        // and end groups come out EQUAL — balanced groups make the
-        // title's window-center also the center of the gap between
-        // the sidebar button and the search entry. (An hexpand spacer
-        // in the start group was tried: GtkHeaderBar's internal boxes
-        // ignore hexpand — probe-verified, navmid stayed exactly the
-        // cluster's width.)
-        const navPhantom = new Gtk.Box();
-        hbar.pack_start(navPhantom);
-        hbar.set_title_widget(navBox);
+        // centering, the honest kind: GtkHeaderBar centers its title
+        // slot against the whole WINDOW, but the end group (search +
+        // menu) is far wider than the sidebar button, so that center
+        // is not the center of the GAP the eye reads. Instead the
+        // cluster rides an hexpanding spacer in the start group —
+        // the spacer swallows exactly the space between the sidebar
+        // button and the search, and the cluster centers inside it.
+        const navMid = new Gtk.Box({hexpand: true});
+        navBox.set_halign(Gtk.Align.CENTER);
+        navMid.append(navBox);
+        hbar.pack_start(navMid);
         this._navBox = navBox;
-        this._navPhantom = navPhantom;
-        // widths are stable (fixed width_chars / icon buttons), so a
-        // single measurement once allocations settle is all it takes
-        GLib.timeout_add_seconds(GLib.PRIORITY_LOW, 1, () => {
-            if (this._dead || !navPhantom.get_parent())
-                return GLib.SOURCE_REMOVE;
-            const startBox = sideBtn.get_parent();
-            const endBox = search.get_parent();
-            if (!startBox?.get_width() || !endBox?.get_width())
-                return GLib.SOURCE_CONTINUE;   // not allocated yet
-            const slack = endBox.get_width() - startBox.get_width();
-            navPhantom.set_size_request(Math.max(0, slack), -1);
-            return GLib.SOURCE_REMOVE;
-        });
+        this._navMid = navMid;
         if (GLib.getenv('TG_DEBUGKEYS')) {
             const mk = (name, wid) => {
                 const kc = new Gtk.EventControllerKey();
@@ -986,11 +972,10 @@ class TickerWindow extends Adw.ApplicationWindow {
                 this._refreshTopNews();
             // the reader owns the whole pane: swap the ticker chrome out
             const reading = p === 'reader';
-            // the phantom bows out in reading mode too: an invisible
-            // wedge would push the start group's back pill away from
-            // the edge while the cluster it balances is hidden
-            for (const w of [sideBtn, menuBtn, search,
-                             navBox, this._navPhantom])
+            // the nav spacer bows out in reading mode — not just to
+            // hide the cluster: its hexpand would shove the back pill
+            // and article title to the far end of the start group
+            for (const w of [sideBtn, menuBtn, search, this._navMid])
                 w.set_visible(!reading);
             if (reading)
                 this._searchPop?.popdown();
