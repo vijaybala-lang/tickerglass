@@ -593,6 +593,58 @@ class TickerWindow extends Adw.ApplicationWindow {
         // the WrapBox rebuilds its children on every hero change
         // (renderChips), so nothing else may be parented inside it
         this._heroBox.append(this._chips);
+
+        // 52W position meter: the chips carry the bounds, this carries
+        // the position — a slim range bar, a knob at the price, and a
+        // caption for the distance from the high. Cairo (two pills +
+        // a knob), so it needs no CSS beyond the caption classes.
+        const wkRow = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
+                                   spacing: 8, valign: Gtk.Align.CENTER,
+                                   halign: Gtk.Align.START,
+                                   margin_start: 2, margin_top: 6});
+        this._wkRow = wkRow;
+        this._wkPos = null;
+        const wkArea = new Gtk.DrawingArea({content_width: 150,
+                                            content_height: 10,
+                                            valign: Gtk.Align.CENTER});
+        this._wkArea = wkArea;
+        wkArea.set_draw_func((a, cr, w, h) => {
+            const dark = Adw.StyleManager.get_default().get_dark();
+            const ink = dark ? [1, 1, 1] : [0.06, 0.06, 0.06];
+            const bh = 4, by = (h - bh) / 2;
+            const pill = (x, ww, r, g, b, al) => {
+                cr.setSourceRGBA(r, g, b, al);
+                cr.newSubPath();
+                cr.arc(x + ww - bh / 2, by + bh / 2, bh / 2,
+                       -Math.PI / 2, Math.PI / 2);
+                cr.arc(x + bh / 2, by + bh / 2, bh / 2,
+                       Math.PI / 2, 3 * Math.PI / 2);
+                cr.closePath();
+                cr.fill();
+            };
+            pill(0, w, ...ink, 0.14);                 // the range
+            const p = this._wkPos;
+            if (p == null)
+                return;
+            pill(0, Math.max(bh, 2 + (w - 4) * p),
+                 ...ink, 0.38);                      // the travelled span
+            const kx = 2 + (w - 4) * p;              // the knob
+            cr.setSourceRGBA(...ink, 0.9);
+            cr.arc(kx, h / 2, 4.5, 0, 2 * Math.PI);
+            cr.fill();
+            cr.setSourceRGBA(dark ? 0.11 : 0.93,
+                             dark ? 0.11 : 0.93,
+                             dark ? 0.12 : 0.94, 1);
+            cr.arc(kx, h / 2, 2, 0, 2 * Math.PI);
+            cr.fill();
+        });
+        wkArea.set_tooltip_text('Position in the 52-week range');
+        wkRow.append(wkArea);
+        this._wkLbl = new Gtk.Label({label: '',
+                                     css_classes: ['dim-label', 'caption']});
+        wkRow.append(this._wkLbl);
+        wkRow.set_visible(false);
+        this._heroBox.append(wkRow);
         chartPage.append(this._heroBox);
 
         // chart
@@ -3585,6 +3637,54 @@ class TickerWindow extends Adw.ApplicationWindow {
 
     /* ── news ─────────────────────────────────────────────────────────── */
 
+    /* per-hero richer stats (quoteSummary): cached per symbol for
+     * 10 min via the hub; failures are stamped so a crumb-starved
+     * egress retries every 5 min at most, not every hero hop.
+     * null data simply means: the hero shows what it already knows */
+    async _loadStats(sym) {
+        if (!sym || this._dead)
+            return;
+        if (this._statsBusy) {
+            this._statsWant = sym;          // land on the newest hero
+            return;
+        }
+        const nowS = () => GLib.get_monotonic_time() / 1e6;
+        const f = this._statsFail;
+        if (f && f.sym === sym && nowS() - f.at < 300
+                && this._stats?.sym !== sym)
+            return;                          // recent failure: back off
+        this._statsBusy = true;
+        try {
+            const data = await this._fetcher.fetch(
+                `stats:${sym}`, () => this._client.stats(sym),
+                {ttl: 600});
+            if (this._dead)
+                return;
+            if (data) {
+                this._statsFail = null;
+                if (this._hero() === sym || this._statsWant == null) {
+                    this._stats = {sym, data};
+                    this._updateHero();
+                }
+            } else {
+                this._statsFail = {sym, at: nowS()};
+                if (this._hero() === sym) {
+                    this._stats = {sym, data: null};
+                    this._updateHero();
+                }
+            }
+        } catch (e) {
+            log(`TickerGlass: stats ${sym} failed: ${e.message}`);
+        } finally {
+            this._statsBusy = false;
+            if (this._statsWant && this._statsWant !== sym) {
+                const w = this._statsWant;
+                this._statsWant = null;
+                this._loadStats(w);
+            }
+        }
+    }
+
     async _loadNews(sym) {
         const list = this._newsList;
         if (!list)
@@ -3856,6 +3956,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         if (sym !== this._newsFor) {
             this._newsFor = sym;
             this._loadNews(sym);
+            this._loadStats(sym);
         }
         for (const [r, b] of Object.entries(this._rangeChips)) {
             b.set_css_classes(r === this._settings.get_string('chart-range')
@@ -3869,6 +3970,7 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._heroPrice.set_label('');
             this._heroPillLbl.set_label('');
             renderChips(this._chips, []);
+            this._wkRow.set_visible(false);
             return;
         }
         this._heroPrice.set_label(q.price != null
@@ -3905,20 +4007,86 @@ class TickerWindow extends Adw.ApplicationWindow {
                                          chg != null ? (up ? 'tg-up' : 'tg-down') : '']);
 
         const m = hist?.meta ?? {};
-        const stateTxt = {REGULAR: 'Market open', PRE: 'Pre-market',
-                          POST: 'After-hours', CLOSED: 'Closed'}[q.state] ?? '';
+        const st = this._stats?.sym === q.symbol ? this._stats.data : null;
+        const n = v => Number.isFinite(+v) && v != null && v !== ''
+            ? +v : null;                          // raw-vs-fmt tolerant
+        // session pill that also counts down: "Market open · closes in
+        // 2h 13m" answers the question the plain state word only implies
+        let stateTxt = {REGULAR: 'Market open', PRE: 'Pre-market',
+                        POST: 'After-hours', CLOSED: 'Closed'}[q.state] ?? '';
+        if (stateTxt) {
+            const nowE = GLib.get_real_time() / 1e6;
+            const dur = s => {
+                s = Math.max(0, Math.round(s));
+                const h = Math.floor(s / 3600), mn = Math.round(s % 3600 / 60);
+                return h ? `${h}h ${mn}m` : `${mn}m`;
+            };
+            if (q.state === 'REGULAR' && m.sessionEnd)
+                stateTxt += ` · closes in ${dur(m.sessionEnd - nowE)}`;
+            else if ((q.state === 'PRE' || q.state === 'CLOSED')
+                     && m.sessionStart) {
+                const d = m.sessionStart - nowE;
+                // "opens in" only reads near a session — tomorrow's
+                // open is not news at noon
+                if (d > 0 && d < 20 * 3600)
+                    stateTxt += ` · opens in ${dur(d)}`;
+            }
+        }
+        // the overnight story the chart window may not even show
+        // (fmtPct speaks fractions, not percentages)
+        const gap = m.open != null && q.prevClose
+            ? (m.open - q.prevClose) / q.prevClose : null;
+        const dy = st?.divYield != null
+            ? (n(st.divYield) < 1 ? n(st.divYield) * 100 : n(st.divYield))
+            : null;
+        const volS = q.volume != null
+            ? fmtCompact(q.volume)
+              + (n(st?.avgVolume)
+                  ? ` · ${(q.volume / n(st.avgVolume)).toFixed(1)}× avg`
+                  : '')
+            : null;
         renderChips(this._chips, [
             stateTxt && [stateTxt, undefined],
-            q.exchange && [q.exchange, undefined],
+            q.exchange && [q.exchange, undefined,
+                           m.tz ? `Exchange timezone: ${m.tz}` : null],
+            gap != null && Math.abs(gap) >= 0.0005
+                && ['Gap', `${gap >= 0 ? '+' : '−'}${
+                    fmtPct(Math.abs(gap))}`],
             m.open != null && ['Open', fmtPrice(m.open, q.currency)],
             m.dayHigh != null && ['High', fmtPrice(m.dayHigh, q.currency)],
             m.dayLow != null && ['Low', fmtPrice(m.dayLow, q.currency)],
-            q.volume != null && ['Volume', fmtCompact(q.volume)],
+            volS && ['Volume', volS],
+            n(st?.marketCap) && ['Mkt Cap', fmtCompact(n(st.marketCap))],
+            n(st?.pe) && ['P/E', n(st.pe).toFixed(1)],
+            dy != null && dy > 0 && ['Div Yield', `${dy.toFixed(2)}%`],
+            n(st?.beta) && ['Beta', n(st.beta).toFixed(2)],
             m.wk52High != null && ['52W High', fmtPrice(m.wk52High, q.currency)],
             m.wk52Low != null && ['52W Low', fmtPrice(m.wk52Low, q.currency)],
             q.prevClose != null && ['Prev Close', fmtPrice(q.prevClose, q.currency)],
+            st?.earningsNext && ['Earnings',
+                GLib.DateTime.new_from_unix_local(st.earningsNext)
+                    .format('%b %e')?.trim()],
             q.currency && [q.currency, undefined],
         ].filter(Boolean));
+
+        // 52W position meter (see the row's construction in _buildUi).
+        // Trust bound: a source that contradicts its own range wildly
+        // (seen relayed: price 3× "its" high) hides the meter rather
+        // than lie; a small overshoot reads as a fresh 52W record.
+        const wLo = q.wk52Low ?? m.wk52Low, wHi = q.wk52High ?? m.wk52High;
+        const ok = wLo != null && wHi != null && q.price != null
+            && wHi > wLo && q.price >= wLo * 0.95 && q.price <= wHi * 1.05;
+        this._wkRow.set_visible(ok);
+        if (ok) {
+            const pos = (q.price - wLo) / (wHi - wLo);
+            this._wkPos = Math.max(0, Math.min(1, pos));
+            const fromHi = q.price / wHi - 1;      // fraction, fmtPct-style
+            this._wkLbl.set_text(fromHi >= -0.0005
+                ? 'at the 52W high'
+                : `${fmtPct(Math.abs(fromHi))} from 52W high`);
+        } else
+            this._wkPos = null;
+        this._wkArea.queue_draw();
     }
 
     /* ── details / prefs / about dialogs ──────────────────────────────── */
@@ -3947,6 +4115,29 @@ class TickerWindow extends Adw.ApplicationWindow {
             ['Market state', q.state ?? ''],
             ['Symbol', q.symbol],
         ];
+        // richer stats join the table only once they've arrived (and
+        // only if they belong to THIS symbol)
+        const st = this._stats?.sym === sym ? this._stats.data : null;
+        if (st?.marketCap != null)
+            rows.push(['Market cap', fmtCompact(st.marketCap)]);
+        if (st?.pe != null)
+            rows.push(['P/E (ttm)', String(st.pe)]);
+        if (st?.divYield != null) {
+            const dyv = st.divYield < 1 ? st.divYield * 100 : st.divYield;
+            rows.push(['Dividend yield', `${dyv.toFixed(2)}%`]);
+        }
+        if (st?.beta != null)
+            rows.push(['Beta', String(st.beta)]);
+        if (st?.avgVolume != null)
+            rows.push(['Avg volume', fmtCompact(st.avgVolume)]);
+        if (st?.sector)
+            rows.push(['Sector', st.sector]);
+        if (st?.industry)
+            rows.push(['Industry', st.industry]);
+        if (st?.earningsNext)
+            rows.push(['Next earnings',
+                GLib.DateTime.new_from_unix_local(st.earningsNext)
+                    .format('%b %e, %Y')?.trim() ?? '']);
         rows.forEach(([k, v], i) => {
             const kl = new Gtk.Label({label: k, css_classes: ['dim-label'],
                                       xalign: 0});
@@ -3956,6 +4147,14 @@ class TickerWindow extends Adw.ApplicationWindow {
             grid.attach(vl, 1, i, 1, 1);
         });
         box.append(grid);
+        if (st?.blurb) {
+            // one paragraph of who-the-company-is, under the numbers
+            const bl = new Gtk.Label({label: st.blurb, wrap: true,
+                                      xalign: 0, css_classes: ['caption',
+                                                                'dim-label']});
+            bl.set_max_width_chars(46);
+            box.append(bl);
+        }
         const btns = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
                                   spacing: 8, halign: Gtk.Align.CENTER});
         const rm = new Gtk.Button({label: 'Remove from watchlist'});
@@ -4242,12 +4441,14 @@ function renderChips(wrap, entries) {
         wrap.remove(c);
         c = next;
     }
-    for (const [k, v] of entries) {
+    for (const [k, v, tip] of entries) {
         const box = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
                                  spacing: 5, css_classes: ['tg-chip-static']});
         box.append(new Gtk.Label({label: k, css_classes: ['dim-label', 'caption']}));
         if (v !== undefined)
             box.append(new Gtk.Label({label: String(v), css_classes: ['caption']}));
+        if (tip)
+            box.set_tooltip_text(String(tip));
         wrap.append(box);
     }
 }

@@ -464,6 +464,78 @@ export class YahooClient {
         return items;
     }
 
+    /** One richer look at a single symbol: quoteSummary's stats +
+     *  profile + calendar in a single call. Same up-front crumb
+     *  handshake as the screener (401 is the expected first answer).
+     *  Returns null when nothing decodes — every consumer treats
+     *  missing stats as "hide the extras", never as an error. */
+    async stats(symbol) {
+        if (!this._crumb && !this._relay) {
+            this._crumbBoot ??= this._bootstrapCrumb();
+            await this._crumbBoot;
+            this._crumbBoot = null;
+        }
+        // quoteSummary is crumb-or-401: with the crumb endpoint itself
+        // rate-limiting our egress there is nothing to fetch — say so
+        // fast instead of eating a 401 (and a hang-prone retry)
+        if (!this._crumb && !this._relay)
+            throw new Error('no crumb — stats unavailable');
+        const url = `https://{{host}}/v10/finance/quoteSummary/` +
+            `${encodeURIComponent(symbol)}?modules=` +
+            'summaryDetail%2CdefaultKeyStatistics%2CassetProfile' +
+            '%2CcalendarEvents' +
+            (this._crumb && !this._relay
+                ? `&crumb=${encodeURIComponent(this._crumb)}` : '');
+        const HONEST = 'TickerGlass/1.0 (GNOME; tickerglass@vijaybala.dev)';
+        let data;
+        try {
+            data = await this._try(`stats ${symbol}`, url,
+                {deadline: 12, ua: HONEST});
+        } catch (e) {
+            // the crumb can go stale between sessions — one
+            // re-handshake, and only if it yields a fresh crumb
+            if (/HTTP 4(01|03)/.test(e.message) && !this._relay) {
+                this._crumb = null;
+                this._crumbBoot ??= this._bootstrapCrumb();
+                await this._crumbBoot;
+                this._crumbBoot = null;
+                if (!this._crumb)
+                    throw e;
+                data = await this._try(`stats ${symbol}`,
+                    url.replace(/&crumb=.*$/, '') +
+                    `&crumb=${encodeURIComponent(this._crumb)}`,
+                    {deadline: 12, ua: HONEST});
+            } else
+                throw e;
+        }
+        const r = data?.quoteSummary?.result?.[0];
+        if (!r)
+            return null;
+        const raw = o => o?.raw ?? o?.fmt ?? null;   // {raw,fmt} everywhere
+        const sd = r.summaryDetail ?? {}, ap = r.assetProfile ?? {};
+        const ks = r.defaultKeyStatistics ?? {};
+        // earnings dates arrive as [{epoch,fmt}] arrays, sometimes only
+        // one of the two keys present
+        const dates = (r.calendarEvents?.earnings?.earningsDate ?? [])
+            .map(d => d?.epoch ?? Date.parse(d?.fmt ?? '') / 1000)
+            .filter(Number.isFinite);
+        const blurb = (ap.longBusinessSummary ?? '').trim();
+        return {
+            symbol,
+            marketCap: raw(sd.marketCap),
+            pe: raw(sd.trailingPE) ?? raw(ks.trailingPE),
+            divYield: raw(sd.dividendYield),
+            avgVolume: raw(sd.averageVolume ?? sd.averageDailyVolume3Month),
+            beta: raw(sd.beta),
+            peg: raw(ks.pegRatio),
+            sector: ap.sector ?? null,
+            industry: ap.industry ?? null,
+            employees: ap.fullTimeEmployees ?? null,
+            blurb: blurb ? blurb.split(/\n/)[0] : null,
+            earningsNext: dates.length ? Math.min(...dates) : null,
+        };
+    }
+
     /* ── market movers ─────────────────────────────────────────────────── */
 
     /** Yahoo's predefined screeners: 'day_gainers' | 'day_losers' |
@@ -1097,6 +1169,20 @@ export class NasdaqClient {
         return this._back.topNews();
     }
 
+    /* stats ride Yahoo as well: direct first (its crumb pairs with its
+     * own cookies — the relayed client can't reuse them), relay after */
+    async stats(symbol) {
+        this._statsShots ??= [new YahooClient(), this._back];
+        for (const c of this._statsShots) {
+            try {
+                const s = await c.stats(symbol);
+                if (s)
+                    return s;
+            } catch { /* next */ }
+        }
+        return null;
+    }
+
     /* screeners are Yahoo-side: Nasdaq's own screener endpoints are
      * Akamai-gated. Direct Yahoo first (its cookie+crumb flow survives
      * the 429 gate — a crumb can only match the session that holds the
@@ -1192,6 +1278,17 @@ export class MarketClient {
             return await this._impl.screener(scrId, count);
         } catch {
             return [];   // market movers are garnish too
+        }
+    }
+
+    /* per-symbol stats are garnish as well: null means "the hero
+     * shows what it already knows", which is the old UI anyway */
+    async stats(symbol) {
+        try {
+            return await (this._impl.stats
+                ? this._impl.stats(symbol) : null);
+        } catch {
+            return null;
         }
     }
 }

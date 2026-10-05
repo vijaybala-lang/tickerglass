@@ -193,6 +193,28 @@ export class DemoClient {
         return out;
     }
 
+    /* stats the hero can surface beyond the chart payload */
+    async stats(symbol) {
+        const [q] = (await this.quotes([symbol])).quotes;
+        const rnd = mulberry32(`${symbol}:stats`);
+        const price = q.price ?? 100;
+        return {
+            symbol,
+            marketCap: price * (2e7 + rnd() * 4e9),
+            pe: 8 + rnd() * 30,
+            divYield: rnd() < 0.6 ? rnd() * 0.045 : null,
+            avgVolume: (q.volume ?? 1e6) * (0.8 + rnd() * 0.5),
+            beta: 0.4 + rnd() * 1.6,
+            peg: 0.6 + rnd() * 2,
+            sector: ['Technology', 'Financials', 'Health Care',
+                     'Consumer', 'Energy'][Math.floor(rnd() * 5)],
+            industry: null, employees: null,
+            blurb: `${symbol} trades as a demo instrument — ` +
+                'connect a data source for the real profile.',
+            earningsNext: null,
+        };
+    }
+
     async history(symbol, range = '1d', interval = 'auto') {
         const iv = intervalFor(range, interval);
         const now = this._now();
