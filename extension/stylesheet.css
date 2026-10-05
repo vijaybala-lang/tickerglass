@@ -111,15 +111,21 @@
 .tg-row-sel { background-color: rgba(16, 20, 28, 0.45);
               border-color: rgba(255, 255, 255, 0.18); }
 .tg-rowbox { spacing: 10px; padding: 5px 8px; }
+/* the app tile: top line = symbol | sparkline (fills) | price,
+ * pct row = shared triangle asset + percent; name dim underneath */
+.tg-row-tile { spacing: 0; }
+.tg-row-praw { spacing: 0; }
+.tg-row-pctbox { spacing: 4px; }
 .tg-row-spark { margin-right: 2px; }
-.tg-row-symcol { spacing: 0; }
 .tg-row-sym { font-weight: 600; font-size: 0.9em; }
 .tg-row-name { font-size: 0.75em; color: rgba(255, 255, 255, 0.55);
-               max-width: 105px; }
+               padding: 0 8px; }
 .tg-row-price { font-weight: 600; font-size: 0.9em; }
-.tg-row-chg { font-size: 0.75em; font-weight: 600; }
+.tg-row-pct { font-size: 0.75em; font-weight: 600; }
 .tg-rows .tg-up { color: #46d98b; }
+.tg-rows .tg-up .tg-row-pct { color: #46d98b; }
 .tg-rows .tg-down { color: #ff7a80; }
+.tg-rows .tg-down .tg-row-pct { color: #ff7a80; }
 
 /* ── footer ─────────────────────────────────────────────────────────────── */
 .tg-foot { padding: 4px 14px 0; spacing: 6px; }

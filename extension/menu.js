@@ -29,7 +29,7 @@ import Cairo from 'gi://cairo';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {paintChart, paintMiniSpark} from './spark.js';
+import {paintChart, paintMiniSpark, paintTri} from './spark.js';
 import {fmtPrice, fmtDelta, fmtPct, fmtCompact, fmtTime, axisDate,
         symbolShort, RANGE_LABEL, COLORS} from './fmt.js';
 import {_, N_} from './i18n.js';
@@ -37,6 +37,49 @@ import {_, N_} from './i18n.js';
 const RANGES = ['1d', '7d', '1mo', '52w', 'ytd', '1y'];
 const INTRADAY = new Set(['1d']);
 const CHART_H = 150;
+
+/* cairo ink can't read CSS — these mirror .tg-gcnt/.tg-lcnt/.tg-dim in
+ * stylesheet.css by hand (same lesson as the old LED board) */
+const INK_UP = [0.18, 1.00, 0.56];
+const INK_DOWN = [1.00, 0.36, 0.42];
+
+/* one instance of the app's shared triangle asset (paintTri), sized for
+ * the top bar; dim is the resting state before the first quote round.
+ * Used by the panel scoreboard (extension.js) and every movers row. */
+const Tri = GObject.registerClass(
+class Tri extends St.DrawingArea {
+    _init(up, size = 11) {
+        super._init({width: size, height: Math.round(size * 0.9),
+                     y_align: Clutter.ActorAlign.CENTER,
+                     reactive: false, can_focus: false});
+        this._up = up;
+        this._dim = false;
+    }
+
+    setDim(dim) {
+        if (this._dim === dim)
+            return;
+        this._dim = dim;
+        this.queue_repaint();
+    }
+
+    vfunc_repaint() {
+        let [w, h] = this.get_surface_size();
+        if (w <= 0 || h <= 0)
+            return;
+        const cr = this.get_context();
+        cr.setOperator(Cairo.Operator.CLEAR);
+        cr.paint();
+        cr.setOperator(Cairo.Operator.OVER);
+        if (this._dim)
+            cr.setSourceRGBA(1, 1, 1, 0.35);
+        else if (this._up)
+            cr.setSourceRGBA(...INK_UP, 1);
+        else
+            cr.setSourceRGBA(...INK_DOWN, 1);
+        paintTri(cr, {w, h, up: this._up});
+    }
+});
 
 const label = (text, cls) => new St.Label({
     text, style_class: cls, x_align: Clutter.ActorAlign.START,
@@ -393,38 +436,47 @@ export class TickerPanel {
         }
     }
 
+    /* THE app's sidebar tile, rebuilt in St: symbol at the head of the
+     * top line, the sparkline filling the middle, the price right with
+     * triangle + percent beneath it (direction carried by the shared
+     * paintTri asset and the tg-up/tg-down colour, exactly as the app
+     * composes it), company name dim on a second line. Clicking the
+     * tile opens the symbol in the app. */
     _mkRow(q, selected) {
         const btn = new St.Button({style_class: 'tg-row' +
                                     (selected ? ' tg-row-sel' : ''),
                                    can_focus: true});
-        const box = row();
-        box.add_child(new MiniSpark(q.spark, (q.change ?? 0) >= 0));
-        const sbox = col('tg-row-symcol');
-        sbox.add_child(label(q.symbol.replace(/^\^/, ''), 'tg-row-sym'));
-        const nm = (q.name ?? '').replace(/[\u2018\u2019'].*/g, '')
-            .replace(/(Common|Corp|Inc|Holdings|Group|Plc|Ltd|Co)\.?$/i, '')
-            .trim();
-        const nameL = label(nm.length > 20 ? nm.slice(0, 19) + '…' : nm,
-                            'tg-row-name');
-        sbox.add_child(nameL);
-        box.add_child(sbox);
-        box.add_child(spacer());
-        const pbox = new St.BoxLayout({vertical: true,
-                                       x_align: Clutter.ActorAlign.END});
-        pbox.add_child(new St.Label({
+        const tile = col('tg-row-tile');
+        const top = row();
+        top.add_child(label(q.symbol.replace(/^\^/, ''), 'tg-row-sym'));
+        const spark = new MiniSpark(q.spark, (q.change ?? 0) >= 0);
+        spark.x_expand = true;      // the app's hexpand: it fills
+        top.add_child(spark);
+        const praw = col('tg-row-praw');
+        praw.add_child(new St.Label({
             text: q.price != null ? fmtPrice(q.price, q.currency) : '—',
             style_class: 'tg-row-price',
             x_align: Clutter.ActorAlign.END}));
-        if (q.change != null) {
-            const pl = new St.Label({
-                text: `${q.change >= 0 ? '▲' : '▼'} ${fmtPct(q.changePct)}`,
-                style_class: 'tg-row-chg ' +
-                    (q.change >= 0 ? 'tg-up' : 'tg-down'),
-                x_align: Clutter.ActorAlign.END});
-            pbox.add_child(pl);
+        const up = (q.change ?? q.changePct ?? 0) >= 0;
+        const pctBox = new St.BoxLayout({style_class: 'tg-row-pctbox' +
+            (q.change != null ? (up ? ' tg-up' : ' tg-down') : ''),
+                                         y_align: Clutter.ActorAlign.END});
+        pctBox.add_child(new Tri(up));
+        if (q.changePct != null) {
+            pctBox.add_child(new St.Label({
+                text: fmtPct(q.changePct),
+                style_class: 'tg-row-pct',
+                x_align: Clutter.ActorAlign.END}));
         }
-        box.add_child(pbox);
-        btn.set_child(box);
+        praw.add_child(pctBox);
+        top.add_child(praw);
+        tile.add_child(top);
+        const nm = (q.name ?? '').replace(/[\u2018\u2019'].*/g, '')
+            .replace(/(Common|Corp|Inc|Holdings|Group|Plc|Ltd|Co)\.?$/i, '')
+            .trim();
+        tile.add_child(label(nm.length > 26 ? nm.slice(0, 25) + '…' : nm,
+                             'tg-row-name'));
+        btn.set_child(tile);
         btn.connect('clicked', () => this.onOpenSym?.(q.symbol));
         return btn;
     }

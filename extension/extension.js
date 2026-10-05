@@ -26,7 +26,6 @@ import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 import GObject from 'gi://GObject';
 import St from 'gi://St';
-import Cairo from 'gi://cairo';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
@@ -35,54 +34,11 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import {MarketClient} from './yahoo.js';
-import {TickerPanel} from './menu.js';
-import {paintTri} from './spark.js';
+import {TickerPanel, Tri} from './menu.js';
 import {initI18n, _} from './i18n.js';
 import {parseWatchlists} from './fmt.js';
 
 const APP_DESKTOP_ID = 'dev.vijaybala.TickerGlass.desktop';
-
-/* cairo ink can't read CSS — these mirror .tg-gcnt/.tg-lcnt/.tg-dim in
- * stylesheet.css by hand (same lesson as the old LED board) */
-const INK_UP = [0.18, 1.00, 0.56];
-const INK_DOWN = [1.00, 0.36, 0.42];
-
-/* one instance of the app's shared triangle asset (paintTri), sized for
- * the top bar; dim is the resting state before the first quote round */
-const Tri = GObject.registerClass(
-class Tri extends St.DrawingArea {
-    _init(up) {
-        super._init({width: 11, height: 10,
-                     y_align: Clutter.ActorAlign.CENTER,
-                     reactive: false, can_focus: false});
-        this._up = up;
-        this._dim = true;
-    }
-
-    setDim(dim) {
-        if (this._dim === dim)
-            return;
-        this._dim = dim;
-        this.queue_repaint();
-    }
-
-    vfunc_repaint() {
-        let [w, h] = this.get_surface_size();
-        if (w <= 0 || h <= 0)
-            return;
-        const cr = this.get_context();
-        cr.setOperator(Cairo.Operator.CLEAR);
-        cr.paint();
-        cr.setOperator(Cairo.Operator.OVER);
-        if (this._dim)
-            cr.setSourceRGBA(1, 1, 1, 0.35);
-        else if (this._up)
-            cr.setSourceRGBA(...INK_UP, 1);
-        else
-            cr.setSourceRGBA(...INK_DOWN, 1);
-        paintTri(cr, {w, h, up: this._up});
-    }
-});
 
 /* ── the indicator ──────────────────────────────────────────────────────── */
 const TickerIndicator = GObject.registerClass(
@@ -107,6 +63,8 @@ class TickerIndicator extends PanelMenu.Button {
                                       y_align: Clutter.ActorAlign.CENTER});
         this._gTri = new Tri(true);
         this._lTri = new Tri(false);
+        this._gTri.setDim(true);
+        this._lTri.setDim(true);
         this._gLbl = new St.Label({style_class: 'tg-gcnt tg-dim',
                                    y_align: Clutter.ActorAlign.CENTER,
                                    text: '—'});
