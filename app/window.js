@@ -883,6 +883,7 @@ class TickerWindow extends Adw.ApplicationWindow {
             vexpand: true, hscrollbar_policy: Gtk.PolicyType.NEVER,
             margin_top: 4,
         });
+        topNewsScroll.add_css_class('tg-plain-scroll');
         // two newspaper columns, column-major (newest runs the left
         // column top-to-bottom, then the right). A second ListBox —
         // not a FlowBox — so the pill skin (.tg-news-list row) applies

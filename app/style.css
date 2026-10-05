@@ -241,7 +241,17 @@ list row { border-radius: 12px; }
 }
 
 /* news: individual cards instead of a flat list */
-.tg-news-list { padding: 0 2px; }
+.tg-news-list { padding: 0 2px; background: transparent; }
+/* the news page sits on the window itself. Two fills try to wear a
+ * panel: the lists' own node background, and the internal viewport
+ * GTK inserts around the columns Box (a Box is not natively
+ * scrollable) — Adwaita clothes that in the opaque view background.
+ * Strip both, plus the overscroll edge shadows that would ring the
+ * ghost panel */
+.tg-plain-scroll,
+.tg-plain-scroll viewport { background: transparent; box-shadow: none; }
+.tg-plain-scroll undershoot,
+.tg-plain-scroll overshoot { background: none; box-shadow: none; }
 /* quiet rows: no card fill at all — the stories carry the page. The
  * highlight is hover's alone (currentcolor wash reads on both themes) */
 .tg-news-list row {
