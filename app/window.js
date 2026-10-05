@@ -488,51 +488,43 @@ class TickerWindow extends Adw.ApplicationWindow {
         // shown only while the hero is a search-preview not yet in the
         // list — rides the badge (chips) line, sized to sit beside the
         // range chips rather than shout over the price
-        this._addBtn = new Gtk.Button({valign: Gtk.Align.CENTER});
+        // split button in the sidebar's .linked recipe: the add zone
+        // and the caret are two FUSED segments — a real MenuButton,
+        // not a hit-zone faked inside one widget (the old
+        // position-routing gesture + hairline divider are gone; the
+        // theme draws the seam)
+        this._addBtn = new Gtk.Box({css_classes: ['linked'],
+                                    valign: Gtk.Align.CENTER});
         {
-            const inner = new Gtk.Box({spacing: 8});
-            const addImg = new Gtk.Image({icon_name: 'list-add-symbolic'});
-            addImg.set_pixel_size(14);
-            inner.append(addImg);
-            inner.append(new Gtk.Label({label: 'Add to List'}));
-            // caret zone lives INSIDE the single button: one border,
-            // one radius, one height — two welded widgets could never
-            // stop drifting by a pixel
-            const sep = new Gtk.Box({css_classes: ['tg-add-sep']});
-            inner.append(sep);
-            const caretImg = new Gtk.Image({icon_name: 'pan-down-symbolic'});
-            caretImg.set_pixel_size(14);
-            inner.append(caretImg);
-            this._addBtn.set_child(inner);
-        }
-        this._addBtn.add_css_class('tg-add');
-        this._addBtn.set_focus_on_click(false);
-        this._addBtn.set_visible(false);
-        // position-routed clicks: left zone adds, right zone (≥36px) opens
-        this._addMenuPop = new Gtk.Popover({autohide: true});
-        this._addMenuPop.set_parent(this._addBtn);
-        this._addMenuPop.connect('show', () => this._populateAddMenu());
-        {
-            const g = new Gtk.GestureClick();
-            g.connect('pressed', (self, nPress, x, y) => {
-                if (nPress !== 1)
-                    return;
-                const w = this._addBtn.get_width();
-                if (x >= w - 36) {
-                    this._populateAddMenu();
-                    const r = new Gdk.Rectangle();
-                    r.x = w - 34;
-                    r.y = 0;
-                    r.width = 32;
-                    r.height = this._addBtn.get_height();
-                    this._addMenuPop.set_pointing_to(r);
-                    this._addMenuPop.popup();
-                } else {
-                    this._addSymbol(this._hero());
-                }
+            const addMain = new Gtk.Button({valign: Gtk.Align.CENTER});
+            {
+                const inner = new Gtk.Box({spacing: 8});
+                const addImg = new Gtk.Image(
+                    {icon_name: 'list-add-symbolic'});
+                addImg.set_pixel_size(14);
+                inner.append(addImg);
+                inner.append(new Gtk.Label({label: 'Add to List'}));
+                addMain.set_child(inner);
+            }
+            addMain.add_css_class('tg-add');
+            addMain.set_focus_on_click(false);
+            addMain.connect('clicked', () =>
+                this._addSymbol(this._hero()));
+            this._addMenuPop = new Gtk.Popover({autohide: true});
+            this._addMenuPop.connect('show', () =>
+                this._populateAddMenu());
+            const addCaret = new Gtk.MenuButton({
+                icon_name: 'pan-down-symbolic',
+                popover: this._addMenuPop,
+                valign: Gtk.Align.CENTER,
+                tooltip_text: 'Choose which list',
             });
-            this._addBtn.add_controller(g);
+            addCaret.add_css_class('tg-add');
+            addCaret.add_css_class('tg-add-caret');
+            this._addBtn.append(addMain);
+            this._addBtn.append(addCaret);
         }
+        this._addBtn.set_visible(false);
         this._heroBox.append(heroTop);
         // badge line: directly under the name, left-flush; the add
         // button rides here beside the symbol badge — the commit button

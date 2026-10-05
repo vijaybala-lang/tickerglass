@@ -139,13 +139,11 @@ window { font-family: Inter, Cantarell, sans-serif; }
   font-size: 0.85em;
   font-weight: 600;
 }
-/* hairline separator inside the single add-button: divides the add zone
- * from the caret zone (clicks are routed by position, not by widget);
- * currentColor so it works on the default button in either theme */
-.tg-add-sep {
-  background: alpha(currentColor, 0.25);
-  min-width: 1px;
-  margin: 3px 0;
+/* caret segment of the split add button: same vertical rhythm as
+ * the label segment, tighter horizontally around the arrow */
+.tg-add-caret {
+  padding-left: 7px;
+  padding-right: 9px;
 }
 /* Manage pill while Remove-tickers mode is ON. Mimics libadwaita's
  * :checked button — a soft alpha wash of the foreground ink that
