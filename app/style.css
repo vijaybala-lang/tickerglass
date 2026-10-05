@@ -170,7 +170,9 @@ window { font-family: Inter, Cantarell, sans-serif; }
   color: alpha(currentColor, 0.30);
   font-size: 0.9em;
   font-weight: 800;
-  margin-left: 4px;
+  /* negative margin pulls the ‖ closer to the sidebar edge than the
+   * row's 10px inset allows (GTK4 permits negative margins) */
+  margin-left: -6px;
 }
 
 /* drop-position indicator for sidebar reordering: a 2px bar riding
