@@ -1031,7 +1031,8 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._loadPill.append(this._loadLbl);
             this._loadPill.set_visible(false);
             // code-side margin: CSS margin would outrank
-            // set_margin_top, and the sling animates this value
+            // set_margin_top; the pill rests here through the whole
+            // sling — the tiles stretch beneath it, not around it
             this._loadPill.set_margin_top(8);
             symOv.add_overlay(this._loadPill);
             // sling-to-refresh: wheel/pad scroll UP while already at
@@ -1620,7 +1621,9 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._loadLbl?.set_text('Pull to refresh');
             this._loadPill.set_visible(true);
             this._loadSpin?.stop();          // progress, not waiting
-            this._loadPill.set_margin_top(8 + px);
+            // the pill stays PUT at its resting spot (margin set at
+            // build) while the tiles stretch beneath it — following
+            // the tile edge read like drift
         }
         // events are discrete — “released” means nothing arrived for
         // a moment; at that instant a full band fires, a partial
@@ -1654,7 +1657,6 @@ class TickerWindow extends Adw.ApplicationWindow {
             const m = (this._symScroll?.get_margin_top?.() ?? 0);
             if (m <= 2) {
                 this._symScroll?.set_margin_top(0);
-                this._loadPill?.set_margin_top(8);
                 if (!this._busy && !this._loadPend)
                     this._loadPill?.set_visible(false);
                 this._slingAnim = 0;
@@ -1662,7 +1664,6 @@ class TickerWindow extends Adw.ApplicationWindow {
             }
             const next = Math.max(0, Math.round(m * 0.35));
             this._symScroll?.set_margin_top(next);
-            this._loadPill?.set_margin_top(8 + next);
             return GLib.SOURCE_CONTINUE;
         };
         if (this._slingAnim)
