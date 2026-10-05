@@ -17,6 +17,7 @@ import Cairo from 'gi://cairo';
 import {MarketClient} from './yahoo.js';
 import {paintChart, paintMiniSpark} from './spark.js';
 import {textPrompt} from './prompt.js';
+import {DataFetcher} from './fetch.js';
 
 /* width (px) of the swipe-revealed delete button */
 const TG_DEL_W = 44;
@@ -211,6 +212,10 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._settings = new Gio.Settings(
             {schema_id: 'org.gnome.shell.extensions.tickerglass'});
         this._client = new MarketClient(this._settings.get_string('data-source'));
+        // one data-fetch layer for every surface: quote rounds, chart
+        // history, movers screener — in-flight dedup + TTL cache live
+        // here, not in per-call-site fields
+        this._fetcher = new DataFetcher();
         this._hist = null;
         this._quotes = [];
         this._launcher = new Gtk.UriLauncher();
@@ -1233,7 +1238,12 @@ class TickerWindow extends Adw.ApplicationWindow {
             return a;
         };
 
-        act('refresh', null, () => this._refresh(true));
+        act('refresh', null, () => {
+            // an explicit refresh means “answers must be new”: purge
+            // every TTL cache (movers, history), then round quotes
+            this._fetcher.invalidate();
+            this._refresh(true);
+        });
         act('readerback', null, () => this._leaveReader());
         act('search', null, () => {
             this.present();
@@ -2875,10 +2885,16 @@ class TickerWindow extends Adw.ApplicationWindow {
             return;
         this._mvBusy = true;
         try {
-            const [g, l] = await Promise.all([
-                this._client.screener('day_gainers', 12),
-                this._client.screener('day_losers', 12),
-            ]);
+            // one hub key, TTL = the 120s policy _refreshMovers already
+            // applies — a concurrent (or storm-retry) call now joins
+            // this producer instead of double-tapping the screener
+            const [g, l] = await this._fetcher.fetch(
+                'movers:market',
+                () => Promise.all([
+                    this._client.screener('day_gainers', 12),
+                    this._client.screener('day_losers', 12),
+                ]),
+                {ttl: 120});
             if (this._dead)
                 return;
             const now = GLib.DateTime.new_now_local();
@@ -3060,10 +3076,20 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._busy = true;
         this._busySince = GLib.get_monotonic_time() / 1e6;
         this._setSpinner(true);
-        this._client.quotes([...syms, ...prev],
-                           {sparkRange:
-                            this._settings.get_string('spark-range'),
-                            onQuote: q => this._partialQuote(q)})
+        // ttl 0: a round must always hit the network (that's what a
+        // round IS) — the fetcher's job here is the in-flight dedup
+        // (watcher storms used to be serialised by _busy alone) and
+        // giving every surface one key to reason about
+        this._fetcher.fetch(
+            `quotes:${syms.slice().sort().join(',')}:${
+                this._settings.get_string('spark-range')}`,
+            () => this._client.quotes([...syms, ...prev],
+                                      {sparkRange:
+                                       this._settings.get_string(
+                                           'spark-range'),
+                                       onQuote: q =>
+                                           this._partialQuote(q)}),
+            {ttl: 0})
             .then(res => {
                 if (this._dead)
                     return;
@@ -3165,9 +3191,13 @@ class TickerWindow extends Adw.ApplicationWindow {
             return;
         }
         this._setSpinner(true);
-        this._client.quotes(syms,
-                            {sparkRange: '1mo',
-                             onQuote: q => this._partialQuote(q)})
+        this._fetcher.fetch(
+            `quotes:${syms.slice().sort().join(',')}:1mo`,
+            () => this._client.quotes(syms,
+                                      {sparkRange: '1mo',
+                                       onQuote: q =>
+                                           this._partialQuote(q)}),
+            {ttl: 0})
             .then(res => {
                 if (this._dead)
                     return;
@@ -3211,7 +3241,12 @@ class TickerWindow extends Adw.ApplicationWindow {
             return;
         this._histKey = key;
         try {
-            const hist = await this._client.history(sym, range, iv);
+            // hub: 60s TTL lets the compare chart reuse the hero's
+            // fetch (and vice versa) — they used to hit the endpoint
+            // twice for the same sym|range|interval
+            const hist = await this._fetcher.fetch(
+                `hist:${key}`, () => this._client.history(sym, range, iv),
+                {ttl: 60});
             if (this._dead || this._hero() !== sym ||
                 this._settings.get_string('chart-range') !== range)
                 return;
@@ -3289,7 +3324,9 @@ class TickerWindow extends Adw.ApplicationWindow {
             return;
         this._cmpKey = key;
         try {
-            const hist = await this._client.history(sym, range, iv);
+            const hist = await this._fetcher.fetch(
+                `hist:${key}`, () => this._client.history(sym, range, iv),
+                {ttl: 60});
             if (this._dead || this._cmpKey !== key ||
                 this._settings.get_string('compare-symbol') !== sym)
                 return;
@@ -3898,6 +3935,11 @@ class TickerWindow extends Adw.ApplicationWindow {
             break;
         case 'data-source':
             this._client.setSource(this._settings.get_string('data-source'));
+            // cached answers belong to the OTHER provider — purge,
+            // and drop the hist-dedup keys so the fetches below fire
+            this._fetcher.invalidate();
+            this._histKey = null;
+            this._cmpKey = null;
             this._refresh(true);
             this._loadHistory();
             break;

@@ -17,13 +17,13 @@ mkdir -p "$EXT/schemas" "$APP"
 
 # extension
 cp "$ROOT"/extension/{metadata.json,extension.js,menu.js,prefs.js,i18n.js,stylesheet.css} "$EXT/"
-cp "$ROOT"/shared/{fmt.js,mock.js,yahoo.js,spark.js,prompt.js} "$EXT/"
+cp "$ROOT"/shared/{fmt.js,mock.js,yahoo.js,spark.js,prompt.js,fetch.js} "$EXT/"
 cp "$ROOT"/schemas/org.gnome.shell.extensions.tickerglass.gschema.xml "$EXT/schemas/"
 glib-compile-schemas "$EXT/schemas"
 
 # app (schema lives user-level; see install.sh step 3)
 cp "$ROOT"/app/{main.js,window.js,style.css,night.css} "$APP/"
-cp "$ROOT"/shared/{fmt.js,mock.js,yahoo.js,spark.js,prompt.js} "$APP/"
+cp "$ROOT"/shared/{fmt.js,mock.js,yahoo.js,spark.js,prompt.js,fetch.js} "$APP/"
 cp "$ROOT"/app/dev.vijaybala.TickerGlass.desktop "$APP/"
 # custom symbolic icons (hicolor tree, added to the theme search path)
 cp -r "$ROOT"/app/icons "$APP/icons"
