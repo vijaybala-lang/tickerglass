@@ -20,11 +20,12 @@
  * opacity, double-declaration accent fallback. */
 
 /* ── panel: the breadth scoreboard ──────────────────────────────────────
- * Two counts with a dot between them: green ▲ up-count, red ▼ down-
- * count for the active watchlist. tg-dim is the resting state before
- * the first quote round lands. */
+ * The app's triangle asset painted by cairo (colours live in
+ * extension.js — CSS can't reach cairo ink); the counts beside them
+ * wear these classes. tg-dim is the resting state before the first
+ * quote round lands. */
 .tg-panel-box {
-    spacing: 6px;
+    spacing: 4px;
     padding: 0 6px;
     font-weight: 700;
 }

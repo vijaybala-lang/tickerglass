@@ -475,3 +475,31 @@ export function paintMiniSpark(cr, {w, h, values, up}) {
     paintSparkline(cr, {w, h, values, pad: 1.5, dot: true,
                         color: up ? COLORS.up : COLORS.down});
 }
+
+/* THE app's up/down indicator (hero pill, sidebar rows, table cells) —
+ * flat ROUNDED triangle, one colour, no rim (Robinhood's clip-path chip).
+ * Stroke + fill of the SAME path: the round line-join puffs each of the
+ * three corners outward by exactly rad, so the rounding holds at hero
+ * size and at 10px in a top bar. Caller sets the source colour first;
+ * direction is flipped by mirroring about the centre. Lives here so the
+ * GNOME extension paints the identical asset on its panel. */
+export function paintTri(cr, {w, h, up}) {
+    cr.save();              // the flip must not leak into the caller's
+    if (!up) {              // context — St hands out the same cr
+        cr.translate(w / 2, h / 2);
+        cr.rotate(Math.PI);
+        cr.translate(-w / 2, -h / 2);
+    }
+    const rad = Math.max(1.1, h * 0.18);
+    const inset = rad + 0.5;
+    cr.setLineJoin(Cairo.LineJoin.ROUND);
+    cr.setLineCap(Cairo.LineCap.ROUND);
+    cr.setLineWidth(rad * 2);
+    cr.moveTo(w / 2, inset);
+    cr.lineTo(w - inset, h - inset);
+    cr.lineTo(inset, h - inset);
+    cr.closePath();
+    cr.strokePreserve();
+    cr.fill();
+    cr.restore();
+}

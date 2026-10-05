@@ -26,6 +26,7 @@ import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 import GObject from 'gi://GObject';
 import St from 'gi://St';
+import Cairo from 'gi://cairo';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
@@ -35,10 +36,53 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import {MarketClient} from './yahoo.js';
 import {TickerPanel} from './menu.js';
+import {paintTri} from './spark.js';
 import {initI18n, _} from './i18n.js';
 import {parseWatchlists} from './fmt.js';
 
 const APP_DESKTOP_ID = 'dev.vijaybala.TickerGlass.desktop';
+
+/* cairo ink can't read CSS — these mirror .tg-gcnt/.tg-lcnt/.tg-dim in
+ * stylesheet.css by hand (same lesson as the old LED board) */
+const INK_UP = [0.18, 1.00, 0.56];
+const INK_DOWN = [1.00, 0.36, 0.42];
+
+/* one instance of the app's shared triangle asset (paintTri), sized for
+ * the top bar; dim is the resting state before the first quote round */
+const Tri = GObject.registerClass(
+class Tri extends St.DrawingArea {
+    _init(up) {
+        super._init({width: 11, height: 10,
+                     y_align: Clutter.ActorAlign.CENTER,
+                     reactive: false, can_focus: false});
+        this._up = up;
+        this._dim = true;
+    }
+
+    setDim(dim) {
+        if (this._dim === dim)
+            return;
+        this._dim = dim;
+        this.queue_repaint();
+    }
+
+    vfunc_repaint() {
+        let [w, h] = this.get_surface_size();
+        if (w <= 0 || h <= 0)
+            return;
+        const cr = this.get_context();
+        cr.setOperator(Cairo.Operator.CLEAR);
+        cr.paint();
+        cr.setOperator(Cairo.Operator.OVER);
+        if (this._dim)
+            cr.setSourceRGBA(1, 1, 1, 0.35);
+        else if (this._up)
+            cr.setSourceRGBA(...INK_UP, 1);
+        else
+            cr.setSourceRGBA(...INK_DOWN, 1);
+        paintTri(cr, {w, h, up: this._up});
+    }
+});
 
 /* ── the indicator ──────────────────────────────────────────────────────── */
 const TickerIndicator = GObject.registerClass(
@@ -55,22 +99,27 @@ class TickerIndicator extends PanelMenu.Button {
 
         this._dark = _interfaceIsDark();
 
-        // the panel is a scoreboard: how many of the active watchlist's
-        // symbols are up and how many are down — same quotes the
-        // dropdown shows, zero extra network
+        // the panel is a scoreboard: the app's own triangle asset in
+        // green and red, each followed by how many of the active
+        // watchlist's symbols are up / down — same quotes the dropdown
+        // shows, zero extra network
         this._box = new St.BoxLayout({style_class: 'tg-panel-box',
                                       y_align: Clutter.ActorAlign.CENTER});
+        this._gTri = new Tri(true);
+        this._lTri = new Tri(false);
         this._gLbl = new St.Label({style_class: 'tg-gcnt tg-dim',
                                    y_align: Clutter.ActorAlign.CENTER,
-                                   text: '▲ —'});
+                                   text: '—'});
+        this._lLbl = new St.Label({style_class: 'tg-lcnt tg-dim',
+                                   y_align: Clutter.ActorAlign.CENTER,
+                                   text: '—'});
         this._sepLbl = new St.Label({style_class: 'tg-sep',
                                      y_align: Clutter.ActorAlign.CENTER,
                                      text: '·'});
-        this._lLbl = new St.Label({style_class: 'tg-lcnt tg-dim',
-                                   y_align: Clutter.ActorAlign.CENTER,
-                                   text: '▼ —'});
+        this._box.add_child(this._gTri);
         this._box.add_child(this._gLbl);
         this._box.add_child(this._sepLbl);
+        this._box.add_child(this._lTri);
         this._box.add_child(this._lLbl);
         this.add_child(this._box);
 
@@ -223,11 +272,18 @@ class TickerIndicator extends PanelMenu.Button {
         const g = qs.filter(q => q.changePct > 0).length;
         const l = qs.filter(q => q.changePct < 0).length;
         const live = qs.length > 0;
-        this._gLbl.set_text(live ? `▲ ${g}` : '▲ —');
-        this._lLbl.set_text(live ? `▼ ${l}` : '▼ —');
-        this._gLbl.toggle_style_class_name('tg-dim', !live);
-        this._lLbl.toggle_style_class_name('tg-dim', !live);
-        this._sepLbl.toggle_style_class_name('tg-dim', !live);
+        this._gLbl.set_text(live ? String(g) : '—');
+        this._lLbl.set_text(live ? String(l) : '—');
+        // St.Widget has add/remove/has_style_class_name — no toggle
+        // (GNOME 50 typelib dump proved it; calling one throws)
+        for (const w of [this._gLbl, this._lLbl, this._sepLbl]) {
+            if (live)
+                w.remove_style_class_name('tg-dim');
+            else
+                w.add_style_class_name('tg-dim');
+        }
+        this._gTri.setDim(!live);
+        this._lTri.setDim(!live);
     }
 
     /* hand a symbol to the desktop app: activate the first watchlist

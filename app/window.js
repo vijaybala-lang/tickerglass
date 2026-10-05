@@ -32,7 +32,7 @@ import Adw from 'gi://Adw';
 import Cairo from 'gi://cairo';
 
 import {MarketClient} from './yahoo.js';
-import {paintChart, paintMiniSpark} from './spark.js';
+import {paintChart, paintMiniSpark, paintTri} from './spark.js';
 import {textPrompt} from './prompt.js';
 import {DataFetcher} from './fetch.js';
 
@@ -2116,8 +2116,9 @@ class TickerWindow extends Adw.ApplicationWindow {
                 cr.fill();
                 return;
             }
-            if (!w._up) {
+            if (!w._up && shape !== 'tri') {
                 // mirror about the centre: draw the up form, flipped
+                // (paintTri handles its own flip — don't double-rotate)
                 cr.translate(ww / 2, hh / 2);
                 cr.rotate(Math.PI);
                 cr.translate(-ww / 2, -hh / 2);
@@ -2147,23 +2148,9 @@ class TickerWindow extends Adw.ApplicationWindow {
                 cr.stroke();                    // white bloom: round corners
                 cr.restore();
             } else if (shape === 'tri') {
-                // Flat ROUNDED triangle, one colour, no rim (user
-                // reference: Robinhood's clip-path chip). Stroke +
-                // fill of the SAME path: the round line-join puffs
-                // each of the three corners outward by exactly rad,
-                // so the rounding holds at hero size and at 10px.
-                // (The old design strode a wide dark rim behind the
-                // fill; the reference asks the colour alone to carry
-                // direction.)
-                const rad = Math.max(1.1, size * 0.18);
-                const inset = rad + 0.5;
-                cr.setLineWidth(rad * 2);
-                cr.moveTo(ww / 2, inset);
-                cr.lineTo(ww - inset, hh - inset);
-                cr.lineTo(inset, hh - inset);
-                cr.closePath();
-                cr.strokePreserve();
-                cr.fill();
+                // the shared asset — see paintTri in spark.js (also the
+                // extension's panel triangles)
+                paintTri(cr, {w: ww, h: hh, up: w._up});
                 return;
             } else {
                 // solid arrow: head + stem, rounded by the fat stroke
