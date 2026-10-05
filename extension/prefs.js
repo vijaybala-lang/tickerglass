@@ -203,11 +203,10 @@ export default class TickerGlassPrefs extends ExtensionPreferences {
             title: _('Panel'), icon_name: 'preferences-system-symbolic',
         });
         const g = new Adw.PreferencesGroup({title: _('In the top bar')});
-        g.description = _('The panel streams the market\u2019s 5 biggest ' +
-            'gainers and 5 biggest losers as a scrolling LED tape — ' +
-            'refreshed every two minutes while the market is awake. If the ' +
-            'screener is unreachable, your own watchlist\u2019s best and ' +
-            'worst five ride the tape instead.');
+        g.description = _('The panel streams the active watchlist\u2019s 5 ' +
+            'biggest gainers and 5 biggest losers as a scrolling LED tape ' +
+            '— the same quotes the dropdown shows, so the board adds no ' +
+            'extra network traffic.');
         page.add(g);
 
         const g2 = new Adw.PreferencesGroup({title: _('Dropdown rows')});

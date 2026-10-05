@@ -1,7 +1,7 @@
 {
   "uuid": "tickerglass@vijaybala.dev",
   "name": "TickerGlass",
-  "description": "A little window onto the market: the panel streams the top 5 gainers and 5 losers as a scrolling LED ticker tape, and a portfolio card with animated charts, sparkline rows and watchlists — powered by Yahoo Finance, no API key, paired with the TickerGlass app.",
+  "description": "A little window onto the market: the panel streams your watchlist's top 5 gainers and 5 losers as a scrolling LED ticker tape, and a portfolio card with animated charts, sparkline rows and watchlists — powered by Yahoo Finance, no API key, paired with the TickerGlass app.",
   "shell-version": ["50"],
   "settings-schema": "org.gnome.shell.extensions.tickerglass",
   "url": "https://vijaybala.dev",

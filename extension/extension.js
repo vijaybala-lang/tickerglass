@@ -213,17 +213,15 @@ class TickerIndicator extends PanelMenu.Button {
         this._ext = ext;
         this._settings = ext.getSettings();
         this._client = new MarketClient(this._settings.get_string('data-source'));
-        this._timer = 0; this._retryTimer = 0; this._mvTimer = 0;
+        this._timer = 0; this._retryTimer = 0;
         this._busy = false; this._refetch = false; this._dead = false;
-        this._mvBusy = false;
         this._quotes = [];
-        this._movers = null;       // {g, l, at} — screener answers
-        this._mvFailAt = 0;
 
         this._dark = _interfaceIsDark();
 
-        // the panel IS the tape: a stream of the market's biggest
-        // gainers then losers, LED-board styled
+        // the panel IS the tape: the ACTIVE WATCHLIST's biggest gainers
+        // then losers, LED-board styled — same quotes the dropdown
+        // shows, so the board costs no extra network
         this._tape = new MoversTape();
         this._tape.setIdle('TICKERGLASS · waking up');
         this.add_child(this._tape);
@@ -348,7 +346,6 @@ class TickerIndicator extends PanelMenu.Button {
                 this._panel.render(this._state());
                 this._panel.ensureHero();
                 this._restartTimer();
-                this._maybeMovers();
                 if (this._refetch) {
                     this._refetch = false;
                     this._fetch(true);
@@ -366,70 +363,28 @@ class TickerIndicator extends PanelMenu.Button {
             });
     }
 
-    /* ── movers for the tape ────────────────────────────────────────────
-     * the SAME screener source the app's Movers page rides (Yahoo-side
-     * even under the Nasdaq source — the facade routes it); 120 s TTL
-     * while the market is awake, patient when it isn't, backoff on
-     * failure, and a watchlist-bred fallback so the tape never dies
-     * just because the screener is being stingy */
-
-    _marketAwake() {
-        return this._quotes.some(q => q.state === 'REGULAR' ||
-            q.state === 'PRE' || q.state === 'POST');
-    }
-
-    _maybeMovers() {
-        if (this._mvBusy || this._dead)
-            return;
-        const now = GLib.get_monotonic_time() / 1e6;
-        const want = this._movers ? (this._marketAwake() ? 120 : 600) : 0;
-        if (this._movers && now - this._movers.at < want)
-            return;                       // still fresh
-        if (!this._movers && this._mvFailAt &&
-                now - this._mvFailAt < 180)
-            return;                       // never landed: slow retry
-        this._mvBusy = true;
-        Promise.all([
-            this._client.screener('day_gainers', 6),
-            this._client.screener('day_losers', 6),
-        ]).then(([g, l]) => {
-            if (this._dead)
-                return;
-            this._mvFailAt = 0;
-            this._movers = {g, l, at: GLib.get_monotonic_time() / 1e6};
-            this._mvBusy = false;
-            this._renderTape();
-        }).catch(e => {
-            if (this._dead)
-                return;
-            log(`TickerGlass ext: movers failed: ${e.message}`);
-            this._mvFailAt = GLib.get_monotonic_time() / 1e6;
-            this._mvBusy = false;
-            this._renderTape();           // watchlist fallback on screen
-        });
-    }
+    /* ── the tape's content: the watchlist's own movers ────────────────
+     * No extra network — the quote round that feeds the dropdown IS
+     * the feed: sort by the day's percent move, up-to-five above the
+     * line (brightest first) then up-to-five below (worst first). A
+     * list that's all-red simply streams no green section; the board
+     * reports what the watchlist actually did today */
 
     _renderTape() {
-        const mv = this._movers;
-        let g = mv?.g?.slice(0, 5) ?? [];
-        let l = mv?.l?.slice(0, 5) ?? [];
-        g = g.filter(m => m.price != null);
-        l = l.filter(m => m.price != null);
-        if (!g.length && !l.length) {
-            // fallback: the watchlist's own best and worst five
-            const qs = this._quotes.filter(q => q.price != null &&
-                q.changePct != null);
-            qs.sort((a, b) => b.changePct - a.changePct);
-            g = qs.slice(0, 5);
-            const inG = new Set(g);
-            l = qs.slice(-5).filter(q => !inG.has(q)).reverse();
-        }
+        const qs = this._quotes.filter(q => q.price != null &&
+            q.changePct != null);
+        const g = qs.filter(q => q.changePct > 0)
+            .sort((a, b) => b.changePct - a.changePct).slice(0, 5);
+        const l = qs.filter(q => q.changePct < 0)
+            .sort((a, b) => a.changePct - b.changePct).slice(0, 5);
         if (!g.length && !l.length) {
             this._tape.setIdle(this._error === 'rate'
                 ? 'TICKERGLASS · feed rate-limited, retrying'
                 : this._error === 'empty'
                     ? 'TICKERGLASS · no symbols — configure in ⚙'
-                    : 'TICKERGLASS · waiting for the feed');
+                    : qs.length
+                        ? 'TICKERGLASS · watchlist flatlined (0.00%)'
+                        : 'TICKERGLASS · waiting for the feed');
             return;
         }
         const segs = [];
@@ -447,14 +402,6 @@ class TickerIndicator extends PanelMenu.Button {
         push(g, true);
         push(l, false);
         this._tape.setItems(segs);
-        // keep the strip honest even when nothing else wakes up
-        if (!this._mvTimer)
-            this._mvTimer = GLib.timeout_add_seconds(
-                GLib.PRIORITY_LOW, 120, () => {
-                    this._mvTimer = 0;
-                    this._maybeMovers();
-                    return GLib.SOURCE_REMOVE;
-                });
     }
 
     async _loadHero(symbol, range) {
@@ -528,7 +475,7 @@ class TickerIndicator extends PanelMenu.Button {
 
     destroy() {
         this._dead = true;
-        for (const id of [this._timer, this._retryTimer, this._mvTimer])
+        for (const id of [this._timer, this._retryTimer])
             if (id)
                 GLib.source_remove(id);
         if (this._settingsId)
