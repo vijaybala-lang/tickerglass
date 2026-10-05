@@ -407,7 +407,9 @@ class TickerWindow extends Adw.ApplicationWindow {
                  'Your symbols  ( Alt+1 )', 'chart'],
                 ['movers', 'tg-movers-symbolic', 'Movers',
                  'Top movers — gainers & losers  ( Alt+2 )',
-                 'movers']]) {
+                 'movers'],
+                ['news', 'tg-news-symbolic', 'News',
+                 'Top financial stories  ( Alt+4 )', 'news']]) {
             const b = new Gtk.Button({css_classes: ['tg-tab'],
                                       tooltip_text: tip});
             const inner = new Gtk.Box({
@@ -854,6 +856,47 @@ class TickerWindow extends Adw.ApplicationWindow {
         }
         const moversPage = movWrap;
 
+        /* news page — market-wide headlines from Yahoo's front feed
+         * (RSS); rows share the chart page's news-pill face (favicon
+         * leader) and a click opens the same in-window reader */
+        const newsWrap = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL,
+                                      margin_start: 12, margin_end: 12,
+                                      margin_top: 8, spacing: 2});
+        const newsTitleRow = new Gtk.Box({
+            orientation: Gtk.Orientation.HORIZONTAL, spacing: 8});
+        this._topNewsTitle = new Gtk.Label({label: 'Top Stories', xalign: 0,
+                                            css_classes: ['tg-page-title'],
+                                            margin_start: 24,
+                                            margin_bottom: 4});
+        newsTitleRow.append(this._topNewsTitle);
+        const tnSpacer = new Gtk.Box();
+        tnSpacer.set_hexpand(true);
+        newsTitleRow.append(tnSpacer);
+        newsWrap.append(newsTitleRow);
+        this._topNewsSummary = new Gtk.Label({label: 'Fetching top stories…',
+                                              xalign: 0, hexpand: true,
+                                              ellipsize: 3, margin_start: 24,
+                                              css_classes: ['dim-label',
+                                                            'caption']});
+        newsWrap.append(this._topNewsSummary);
+        const topNewsScroll = new Gtk.ScrolledWindow({
+            vexpand: true, hscrollbar_policy: Gtk.PolicyType.NEVER,
+            margin_top: 4,
+        });
+        this._topNewsList = new Gtk.ListBox({css_classes: ['tg-news-list']});
+        this._topNewsList.add_css_class('flat');
+        this._topNewsList.connect('row-activated', (l, row) => {
+            if (row?._url)
+                this._openReader(row._url, row._title);
+        });
+        this._topNewsEmpty = new Gtk.Label({label: 'Fetching top stories…',
+                                            css_classes: ['dim-label'],
+                                            margin_top: 12,
+                                            margin_bottom: 12});
+        this._topNewsList.set_placeholder(this._topNewsEmpty);
+        topNewsScroll.set_child(this._topNewsList);
+        newsWrap.append(topNewsScroll);
+
         this._stack = new Gtk.Stack({
             vexpand: true, transition_type: Gtk.StackTransitionType.SLIDE_LEFT_RIGHT,
             transition_duration: 180,
@@ -861,24 +904,30 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._stack.add_titled(chartPage, 'chart', 'Chart');
         this._stack.add_titled(tablePage, 'table', 'Table');
         this._stack.add_titled(moversPage, 'movers', 'Movers');
+        this._stack.add_titled(newsWrap, 'news', 'News');
         this._updateNavChips();   // boot with Watchlist wearing the pill
         content.append(this._stack);
         this._stack.connect('notify::visible-child-name', () => {
             const p = this._stack.get_visible_child_name();
-            if (p === 'chart' || p === 'table' || p === 'movers')
+            if (['chart', 'table', 'movers', 'news'].includes(p))
                 this._viewAction?.set_state(new GLib.Variant('s', p));
             this._updateNavChips();
-            // The watchlist lives IN the sidebar, so Movers — a
-            // dashboard that wants every column it can get — collapses
-            // it on entry and restores the user's watchlist preference
-            // on the way back. A manual Alt+S stays honored for as
-            // long as you stay on the page; only toggles outside
-            // Movers rewrite the remembered preference.
-            if (p === 'movers')
+            // The watchlist lives IN the sidebar, so full-bleed pages —
+            // Movers and Top Stories — collapse it on entry and restore
+            // the user's watchlist preference on the way back. A manual
+            // Alt+S stays honored for as long as you stay on the page;
+            // only toggles outside those pages rewrite the remembered
+            // preference.
+            if (p === 'movers' || p === 'news')
                 this._split.set_show_sidebar(false);
             else if (p === 'chart' || p === 'table')
                 this._split.set_show_sidebar(
                     this._settings.get_boolean('sidebar-visible'));
+            // leaving the reader returns to whatever page held it
+            if (p !== 'reader')
+                this._preReader = p;
+            if (p === 'news')
+                this._refreshTopNews();
             // the reader owns the whole pane: swap the ticker chrome out
             const reading = p === 'reader';
             for (const w of [sideBtn, menuBtn, search, navBox])
@@ -1207,6 +1256,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         viewM.append('Chart', 'win.view::chart');
         viewM.append('Table', 'win.view::table');
         viewM.append('Movers', 'win.view::movers');
+        viewM.append('Top Stories', 'win.view::news');
         menu.append_section('View', viewM);
 
         const src = new Gio.Menu();
@@ -1291,6 +1341,7 @@ class TickerWindow extends Adw.ApplicationWindow {
             app.set_accels_for_action('win.view::chart', ['<alt>1']);
             app.set_accels_for_action('win.view::movers', ['<alt>2']);
             app.set_accels_for_action('win.view::table', ['<alt>3']);
+            app.set_accels_for_action('win.view::news', ['<alt>4']);
         }
         act('sidebar', null, () =>
             this._split.set_show_sidebar(!this._split.show_sidebar));
@@ -2801,6 +2852,9 @@ class TickerWindow extends Adw.ApplicationWindow {
             log(`TG table rebuild: ${sorted.length} rows in ` +
                 `${((GLib.get_monotonic_time() - _t) / 1e3).toFixed(1)}ms`);
         this._refreshMovers();
+        // Top Stories refetches itself only while on screen (cheap
+        // visibility gate inside); painting from the last answer is free
+        this._refreshTopNews();
     }
 
     /* keep the header chips honest: whichever page is up wears the
@@ -2808,11 +2862,14 @@ class TickerWindow extends Adw.ApplicationWindow {
     _updateNavChips() {
         if (!this._navChips)
             return;
-        const movers = this._stack?.get_visible_child_name() === 'movers';
-        this._navChips.watch.set_css_classes(
-            movers ? ['tg-tab'] : ['tg-tab', 'tg-tab-active']);
-        this._navChips.movers.set_css_classes(
-            movers ? ['tg-tab', 'tg-tab-active'] : ['tg-tab']);
+        // the cluster grows a segment without growing this function:
+        // whichever page is up makes its chip wear the active pill
+        const page = this._stack?.get_visible_child_name();
+        const active = {chart: 'watch', movers: 'movers',
+                        news: 'news'}[page] ?? '';
+        for (const [key, b] of Object.entries(this._navChips))
+            b.set_css_classes(key === active
+                ? ['tg-tab', 'tg-tab-active'] : ['tg-tab']);
     }
 
     /* rebuild the movers dashboard from the in-memory quote map: the
@@ -2939,6 +2996,72 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._mvBusy = false;
         }
         this._refreshMovers();
+    }
+
+    /* ── top news (News page) ───────────────────────────────────────────
+     * same stale-while-revalidate deal as the movers screener: the last
+     * answer stays on screen while the next one is in flight, refetch
+     * only while the page is actually open, every 2 min at most */
+    _refreshTopNews() {
+        if (!this._topNewsList)
+            return;
+        if (this._stack?.get_visible_child_name() === 'news') {
+            const tn = this._topNews;
+            const age = tn ? GLib.get_monotonic_time() / 1e6 - tn.stamp
+                : 1e9;
+            if (age > 120 && !this._tnBusy)
+                this._loadTopNews();
+            this._paintTopNews();
+        }
+    }
+
+    async _loadTopNews() {
+        if (this._tnBusy || this._dead)
+            return;
+        this._tnBusy = true;
+        try {
+            // hub key: a storm of page-entries joins the one producer
+            // instead of re-pulling the feed
+            const items = await this._fetcher.fetch(
+                'news:top', () => this._client.topNews(), {ttl: 120});
+            if (this._dead)
+                return;
+            const now = GLib.DateTime.new_now_local();
+            log(`TickerGlass: top news ${items.length} stories`);
+            this._topNews = {items, at: now ? now.format('%H:%M') : '',
+                stamp: GLib.get_monotonic_time() / 1e6};
+        } catch (e) {
+            log(`TickerGlass: top news failed: ${e.message}`);
+            // stamp the failure NOW (not 0): every table flush while
+            // the page is open would otherwise re-hit a dead feed
+            // round after round — back off like a normal answer did
+            this._topNews ??= {items: [], at: '',
+                stamp: GLib.get_monotonic_time() / 1e6};
+        } finally {
+            this._tnBusy = false;
+        }
+        this._paintTopNews();
+    }
+
+    _paintTopNews() {
+        const list = this._topNewsList;
+        if (!list)
+            return;
+        for (let r = list.get_first_child(); r;) {
+            const next = r.get_next_sibling();
+            list.remove(r);
+            r = next;
+        }
+        const tn = this._topNews;
+        for (const n of tn?.items ?? [])
+            list.append(this._mkNewsRow(n));
+        this._topNewsSummary.set_text(
+            tn?.items.length
+                ? `Yahoo Finance front feed · refreshed ${tn.at}`
+                : tn ? 'News feed unreachable — try the Yahoo data source'
+                     : 'Fetching top stories…');
+        this._topNewsEmpty.set_text(tn?.items.length ? ''
+            : tn ? 'The feed came back quiet' : 'Fetching…');
     }
 
     _updateSparkBtn() {
@@ -3424,40 +3547,46 @@ class TickerWindow extends Adw.ApplicationWindow {
             return;
         this._newsCount.set_text(items.length ? `· ${items.length}` : '');
         this._newsEmpty.set_text(sym ? `No recent news for ${sym}` : '');
-        for (const n of items) {
-            const row = new Gtk.ListBoxRow();
-            row._url = n.url;
-            row._title = n.title;
-            const line = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
-                                      spacing: 10, margin_start: 12,
-                                      margin_end: 12, margin_top: 8,
-                                      margin_bottom: 8});
-            // site icon: favicon when known, letter avatar meanwhile
-            const av = new Gtk.DrawingArea();
-            av.set_content_width(20);
-            av.set_content_height(20);
-            av.set_valign(Gtk.Align.CENTER);
-            av._host = hostOf(n.url);
-            av._letter = ((n.source || av._host || '?').trim()[0] ?? '?')
-                .toUpperCase();
-            av.set_draw_func(paintFav);
-            favAttach(av);
-            line.append(av);
-            const txt = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL,
-                                     spacing: 2, hexpand: true});
-            const title = new Gtk.Label({label: n.title, xalign: 0,
-                                         wrap: true, ellipsize: 3});
-            title.set_lines(2);
-            title.add_css_class('tg-news-title');
-            txt.append(title);
-            const sub = new Gtk.Label({
-                label: [n.source, relTime(n.at)].filter(Boolean).join('  ·  '),
-                xalign: 0, css_classes: ['dim-label', 'caption']});
-            txt.append(sub);
-            line.append(txt);
-            row.set_child(line);
-            list.append(row);
-        }
+        for (const n of items)
+            list.append(this._mkNewsRow(n));
+    }
+
+    /* one news pill row: favicon (letter avatar until it lands), title,
+     * source · age. Shared by the chart page's per-symbol list and the
+     * Top Stories page so both wear the exact same face */
+    _mkNewsRow(n) {
+        const row = new Gtk.ListBoxRow();
+        row._url = n.url;
+        row._title = n.title;
+        const line = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
+                                  spacing: 10, margin_start: 12,
+                                  margin_end: 12, margin_top: 8,
+                                  margin_bottom: 8});
+        // site icon: favicon when known, letter avatar meanwhile
+        const av = new Gtk.DrawingArea();
+        av.set_content_width(20);
+        av.set_content_height(20);
+        av.set_valign(Gtk.Align.CENTER);
+        av._host = hostOf(n.url);
+        av._letter = ((n.source || av._host || '?').trim()[0] ?? '?')
+            .toUpperCase();
+        av.set_draw_func(paintFav);
+        favAttach(av);
+        line.append(av);
+        const txt = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL,
+                                 spacing: 2, hexpand: true});
+        const title = new Gtk.Label({label: n.title, xalign: 0,
+                                     wrap: true, ellipsize: 3});
+        title.set_lines(2);
+        title.add_css_class('tg-news-title');
+        txt.append(title);
+        const sub = new Gtk.Label({
+            label: [n.source, relTime(n.at)].filter(Boolean).join('  ·  '),
+            xalign: 0, css_classes: ['dim-label', 'caption']});
+        txt.append(sub);
+        line.append(txt);
+        row.set_child(line);
+        return row;
     }
 
     _openUrl(url) {
@@ -3518,7 +3647,9 @@ class TickerWindow extends Adw.ApplicationWindow {
         if (this._stack.get_visible_child_name() !== 'reader')
             return;
         this._readerWeb?.load_uri('about:blank');   // stop + free the page
-        this._stack.set_visible_child_name('chart');
+        // back to the page that held the article: a top-story returns
+        // to Top Stories, a ticker's news to the chart
+        this._stack.set_visible_child_name(this._preReader ?? 'chart');
     }
 
     _startDrawIn() {

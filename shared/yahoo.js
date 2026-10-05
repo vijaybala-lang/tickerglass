@@ -451,6 +451,19 @@ export class YahooClient {
             });
     }
 
+    /** Market-wide top headlines: Yahoo Finance's own RSS front feed,
+     *  keyless and crumb-free. Same {title, source, url, at} shape the
+     *  per-symbol news() returns, so every news surface renders blind. */
+    async topNews() {
+        const body = await this._try('top news',
+            'https://finance.yahoo.com/news/rssindex', {json: false});
+        const items = parseRssItems(typeof body === 'string'
+            ? body : '');
+        if (!items.length)
+            throw new Error('top-news feed had no items');
+        return items;
+    }
+
     /* ── market movers ─────────────────────────────────────────────────── */
 
     /** Yahoo's predefined screeners: 'day_gainers' | 'day_losers' |
@@ -501,6 +514,70 @@ export class YahooClient {
 
 /* meta (v8/v7 spark) → our canonical Quote. Extended-hours prices ride
  * through when that's the live session. */
+/* ── tiny RSS readers ────────────────────────────────────────────────────
+ * The top-news feed is flat, machine-generated XML (one <item> per line);
+ * pulling in a real XML parser for four tags would be the heavier option.
+ * CDATA and the standard entities are unwrapped so titles read the way
+ * the publisher wrote them. */
+function xmlUnesc(s) {
+    return (s ?? '')
+        .replace(/^<!\[CDATA\[([\s\S]*?)\]\]>$/, '$1')
+        .replace(/&#x([0-9a-fA-F]+);/g,
+            (_, h) => String.fromCodePoint(parseInt(h, 16)))
+        .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(+d))
+        .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+        .replace(/&amp;/g, '&');
+}
+
+/* feed dates arrive ISO (2026-09-23T01:52:26Z) or RFC 822
+ * (Wed, 24 Sep 2026 08:21:19 -0400); both normalize to epoch seconds */
+function rssDate(s) {
+    if (!s)
+        return 0;
+    let dt = GLib.DateTime.new_from_iso8601(s.trim(), null);
+    if (!dt) {
+        const m = new RegExp('^\\w+, (\\d+) ([A-Za-z]{3}) (\\d{4}) ' +
+            '(\\d+):(\\d+):(\\d+) *(?:([+-]\\d{4})|GMT|UTC|Z)?$')
+            .exec(s.trim());
+        if (!m)
+            return 0;
+        const mo = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul',
+            'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].indexOf(m[2]) + 1;
+        if (mo < 1)
+            return 0;
+        dt = GLib.DateTime.new_utc(+m[3], mo, +m[1],
+            +m[4], +m[5], +m[6]);
+        // the RFC 822 offset says how far from UTC the wall clock is —
+        // walk back that far to get the true instant
+        if (m[7])
+            dt = dt.add_seconds(
+                -(+m[7].slice(1, 3) * 3600 + +m[7].slice(3, 5) * 60) *
+                (m[7][0] === '-' ? -1 : 1));
+    }
+    return dt ? dt.to_unix() : 0;
+}
+
+function parseRssItems(xml) {
+    const out = [];
+    const grab = (block, tag) => {
+        const m = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`)
+            .exec(block);
+        return m ? xmlUnesc(m[1].trim()) : '';
+    };
+    const re = /<item>([\s\S]*?)<\/item>/g;
+    let m;
+    while (out.length < 24 && (m = re.exec(xml))) {
+        const title = grab(m[1], 'title'), url = grab(m[1], 'link');
+        if (!title || !url)
+            continue;
+        const src = grab(m[1], 'source');
+        out.push({title, url, source: src || 'Yahoo Finance',
+            at: rssDate(grab(m[1], 'pubDate'))});
+    }
+    return out;
+}
+
 function normalizeQuote(symbol, m, spark) {
     const state = m.marketState ?? 'REGULAR';
     let price = m.regularMarketPrice ?? null;
@@ -1015,6 +1092,11 @@ export class NasdaqClient {
         return this._back.news(symbol);
     }
 
+    /* ditto the top-news RSS front feed — keyless Yahoo-side too */
+    async topNews() {
+        return this._back.topNews();
+    }
+
     /* screeners are Yahoo-side: Nasdaq's own screener endpoints are
      * Akamai-gated. Direct Yahoo first (its cookie+crumb flow survives
      * the 429 gate — a crumb can only match the session that holds the
@@ -1087,6 +1169,22 @@ export class MarketClient {
         } catch {
             return [];   // news is garnish — never break the quote flow
         }
+    }
+
+    /* top stories are an open RSS feed: give every source a direct
+     * shot first — reader relays mangle XML into prose (news() rides
+     * the relay because per-symbol news comes back inside JSON, but
+     * raw RSS must not), and the impl path is the clean-IP fallback */
+    async topNews() {
+        this._newsDir ??= new YahooClient();
+        for (const c of [this._newsDir, this._impl]) {
+            try {
+                const items = c.topNews ? await c.topNews() : null;
+                if (items?.length)
+                    return items;
+            } catch { /* next shot */ }
+        }
+        throw new Error('top news unreachable');
     }
 
     async screener(scrId, count = 12) {

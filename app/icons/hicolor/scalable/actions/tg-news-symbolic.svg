@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- News nav glyph: a folded front page — headline block, kicker line
+     and body rules punched out of the sheet (even-odd holes).
+     -symbolic.svg => GTK recolors it to the CSS color (accent when
+     active), same convention as the movers pair. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <path fill="#bebebe" fill-rule="evenodd" d="M1.2 2 H14 V14 H1.2 Z
+      M2.6 3.4 H8.4 V6.8 H2.6 Z
+      M9.6 3.4 H12.6 V4.7 H9.6 Z
+      M2.6 8 H12.6 V9.1 H2.6 Z
+      M2.6 10.2 H12.6 V11.3 H2.6 Z
+      M2.6 12.4 H7.4 V13.5 H2.6 Z"/>
+</svg>

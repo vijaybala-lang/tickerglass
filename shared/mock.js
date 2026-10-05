@@ -177,6 +177,22 @@ export class DemoClient {
         return out;
     }
 
+    /* tabloid front page: one slot-machine pull per publisher so the
+     * demo News page shows the favicon machinery working, per-host */
+    async topNews() {
+        const hosts = ['www.reuters.com', 'www.cnbc.com', 'www.barrons.com',
+                       'finance.yahoo.com', 'www.marketwatch.com',
+                       'seekingalpha.com'];
+        const out = [];
+        for (let i = 0; i < hosts.length * 2; i++) {
+            const sym = ['AAPL', 'NVDA', 'TSLA', 'AMD', 'JPM', 'O'][i % 6];
+            const item = (await this.news(sym))[i % 6];
+            out.push({...item, url: `https://${hosts[i % hosts.length]}/` +
+                `story-${i}`});
+        }
+        return out;
+    }
+
     async history(symbol, range = '1d', interval = 'auto') {
         const iv = intervalFor(range, interval);
         const now = this._now();
