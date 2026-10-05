@@ -65,56 +65,78 @@ class MoversTape extends St.DrawingArea {
                      can_focus: false,
                      y_align: Clutter.ActorAlign.CENTER,
                      width: 300, height: 20});
-        this._runs = [];           // [{layout, wpx, rgb}]
+        this._runs = [];           // [{lay, wpx, rgb}] — built lazily
         this._stripW = 0;
         this._off = 0;
         this._last = GLib.get_monotonic_time();
+        this._pending = null;      // items awaiting a paint-context
         this._idleText = '';
-        this._idleLayout = null;
+        this._idleLay = null;
+        this._dirty = false;
         this._clockId = 0;
         this.connect('destroy', () => this._stop());
         this._start();
     }
 
-    /** items: [{text, rgb}] — painted in order, scrolling as one strip */
+    /** items: [{text, rgb}] — painted in order, scrolling as one strip.
+     *  Pango layouts cannot be conjured outside a cairo context in this
+     *  GJS (new Pango.Layout(ctx) throws — fresh-login crash proved it),
+     *  so the set is parked here and realized on the next repaint */
     setItems(items) {
-        const ctx = this.get_pango_context();
-        const desc = Pango.FontDescription.from_string('Monospace Bold 10');
+        this._pending = (items ?? []).filter(it => it?.text);
+        this._idleText = '';
+        this._idleLay = null;
         this._runs = [];
         this._stripW = 0;
-        for (const it of items ?? []) {
-            if (!it?.text)
-                continue;
-            const lay = new Pango.Layout(ctx);
-            lay.set_font_description(desc);
-            lay.set_text(it.text, -1);
-            const [wp] = lay.get_pixel_size();
-            this._runs.push({lay, wp, rgb: it.rgb ?? LED.dim});
-            this._stripW += wp;
-        }
-        // a strip narrower than the window would smear the seam; pad it
-        // by repeating the whole set once (cheap — these are tiny)
-        if (this._runs.length && this._stripW < 300) {
-            const again = this._runs.map(r => r);
-            for (const r of again) {
-                this._runs.push(r);
-                this._stripW += r.wp;
-            }
-        }
         this._off = 0;
+        this._dirty = true;
         this.queue_repaint();
     }
 
     setIdle(text) {
+        this._pending = null;
         this._idleText = text ?? '';
-        const lay = new Pango.Layout(this.get_pango_context());
-        lay.set_font_description(
-            Pango.FontDescription.from_string('Monospace 10'));
-        lay.set_text(this._idleText, -1);
-        this._idleLayout = this._idleText ? lay : null;
+        this._idleLay = null;      // realized on paint, like the runs
         this._runs = [];
         this._stripW = 0;
+        this._dirty = true;
         this.queue_repaint();
+    }
+
+    _mkLayout(cr, text, font) {
+        const lay = PangoCairo.create_layout(cr);
+        // NO desc.free(): GJS reclaims FontDescription — an explicit
+        // free double-frees at teardown (unit-proven: 'free():
+        // invalid pointer' at exit)
+        const desc = Pango.FontDescription.from_string(font);
+        lay.set_font_description(desc);
+        lay.set_text(text, -1);
+        return lay;
+    }
+
+    _realize(cr) {
+        this._dirty = false;
+        if (this._pending) {
+            for (const it of this._pending) {
+                const lay = this._mkLayout(cr, it.text, 'Monospace Bold 10');
+                const [wp] = lay.get_pixel_size();
+                this._runs.push({lay, wp, rgb: it.rgb ?? LED.dim});
+                this._stripW += wp;
+            }
+            // a strip narrower than the window would smear the seam;
+            // double the set (same layout objects — painting is
+            // read-only) so the tiling loop always has material
+            if (this._runs.length && this._stripW < 300) {
+                for (const r of [...this._runs]) {
+                    this._runs.push(r);
+                    this._stripW += r.wp;
+                }
+            }
+            this._pending = null;
+        } else if (this._idleText) {
+            this._idleLay = this._mkLayout(cr, this._idleText,
+                'Monospace 10');
+        }
     }
 
     vfunc_repaint() {
@@ -125,14 +147,15 @@ class MoversTape extends St.DrawingArea {
         cr.setOperator(Cairo.Operator.CLEAR);
         cr.paint();
         cr.setOperator(Cairo.Operator.OVER);
+        if (this._dirty)
+            this._realize(cr);
 
         if (!this._runs.length) {
-            if (this._idleLayout) {
-                const [, lh] = this._idleLayout.get_pixel_size();
+            if (this._idleLay) {
+                const [lw, lh] = this._idleLay.get_pixel_size();
                 cr.setSourceRGBA(...LED.dim, 0.85);
-                cr.moveTo(Math.max(6, (w - this._idleLayout.
-                    get_pixel_size()[0]) / 2), (h - lh) / 2);
-                PangoCairo.show_layout(cr, this._idleLayout);
+                cr.moveTo(Math.max(6, (w - lw) / 2), (h - lh) / 2);
+                PangoCairo.show_layout(cr, this._idleLay);
             }
             return;
         }
