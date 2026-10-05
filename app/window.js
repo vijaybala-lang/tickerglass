@@ -354,8 +354,8 @@ class TickerWindow extends Adw.ApplicationWindow {
     _buildUi() {
         const hbar = new Adw.HeaderBar();
         // Adw.HeaderBar paints the window title centered when its title
-        // slot is untouched — park an empty box here to evict the app
-        // name; the nav cluster takes the slot (and the center) below
+        // slot is untouched — feed it an empty box to evict the app name
+        // (the nav cluster centers elsewhere: see the start-group spacer)
         hbar.title_widget = new Gtk.Box();
         this.set_title('TickerGlass');
         const sideBtn = new Gtk.ToggleButton({icon_name: 'sidebar-show-symbolic',
@@ -377,9 +377,8 @@ class TickerWindow extends Adw.ApplicationWindow {
         hbar.pack_end(search);
         this._searchEntry = search;
         this._buildSearchPopover(search);
-        // page navigation in the bar's dead center: the title slot is
-        // the one place GtkHeaderBar centers, and the cluster still
-        // rides the reader-chrome visibility loop.
+        // page navigation, centered in the gap between the sidebar
+        // button and the search (see the spacer note at pack_start).
         // Icon + label nav (.tg-tab): the movers glyph is the app's
         // own up/down triangle pair, shipped as a symbolic next to
         // the code so it recolors like stock icons — the adwaita set
@@ -425,8 +424,19 @@ class TickerWindow extends Adw.ApplicationWindow {
             navBox.append(b);
             this._navChips[key] = b;
         }
-        hbar.set_title_widget(navBox);
+        // centering, the honest kind: GtkHeaderBar centers its title
+        // slot against the whole WINDOW, but the end group (search +
+        // menu) is far wider than the sidebar button, so that center
+        // is not the center of the GAP the eye reads. Instead the
+        // cluster rides an hexpanding spacer in the start group —
+        // the spacer swallows exactly the space between the sidebar
+        // button and the search, and the cluster centers inside it.
+        const navMid = new Gtk.Box({hexpand: true});
+        navBox.set_halign(Gtk.Align.CENTER);
+        navMid.append(navBox);
+        hbar.pack_start(navMid);
         this._navBox = navBox;
+        this._navMid = navMid;
         if (GLib.getenv('TG_DEBUGKEYS')) {
             const mk = (name, wid) => {
                 const kc = new Gtk.EventControllerKey();
@@ -962,7 +972,10 @@ class TickerWindow extends Adw.ApplicationWindow {
                 this._refreshTopNews();
             // the reader owns the whole pane: swap the ticker chrome out
             const reading = p === 'reader';
-            for (const w of [sideBtn, menuBtn, search, navBox])
+            // the nav spacer bows out in reading mode — not just to
+            // hide the cluster: its hexpand would shove the back pill
+            // and article title to the far end of the start group
+            for (const w of [sideBtn, menuBtn, search, this._navMid])
                 w.set_visible(!reading);
             if (reading)
                 this._searchPop?.popdown();
