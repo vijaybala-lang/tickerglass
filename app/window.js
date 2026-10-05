@@ -692,7 +692,10 @@ class TickerWindow extends Adw.ApplicationWindow {
             max_content_height: 230, propagate_natural_height: true,
             margin_start: 12, margin_end: 12, margin_top: 4, margin_bottom: 6,
         });
-        newsScroll.add_css_class('card');
+        // same skin as the Top Stories page: no card frame, no panel
+        // fill — the ticker's headlines sit straight on the page and
+        // only the hover wash says "row"
+        newsScroll.add_css_class('tg-plain-scroll');
         this._newsList = new Gtk.ListBox({css_classes: ['tg-news-list']});
         this._newsList.add_css_class('flat');
         // no separators: the rows are pills now, the gaps between them
