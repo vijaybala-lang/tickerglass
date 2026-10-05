@@ -17,9 +17,10 @@
  */
 /* menu.js — the dropdown card. Plain JS class with an St.Widget actor
  * embedded via a PopupMenuSection (weatherglass ForecastPanel pattern):
- * header → hero price → animated chart + range chips → top-gainers and
- * top-losers rows (click launches the app) →
- * footer. Series data arrives from extension.js; this file only renders. */
+ * header → hero price → top-gainers and top-losers rows (click launches
+ * the app) → open-app button → footer. Quotes arrive from extension.js;
+ * this file only renders. No chart here anymore: history lives one
+ * click away, in the app. */
 
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
@@ -29,14 +30,9 @@ import Cairo from 'gi://cairo';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {paintChart, paintMiniSpark, paintTri} from './spark.js';
-import {fmtPrice, fmtDelta, fmtPct, fmtCompact, fmtTime, axisDate,
-        symbolShort, RANGE_LABEL, COLORS} from './fmt.js';
+import {paintMiniSpark, paintTri} from './spark.js';
+import {fmtPrice, fmtDelta, fmtPct, symbolShort} from './fmt.js';
 import {_, N_} from './i18n.js';
-
-const RANGES = ['1d', '7d', '1mo', '52w', 'ytd', '1y'];
-const INTRADAY = new Set(['1d']);
-const CHART_H = 150;
 
 /* cairo ink can't read CSS — these mirror .tg-gcnt/.tg-lcnt/.tg-dim in
  * stylesheet.css by hand (same lesson as the old LED board) */
@@ -96,66 +92,6 @@ function spacer() {
     });
 }
 
-/* big hero chart area */
-const ChartArea = GObject.registerClass(
-class ChartArea extends St.DrawingArea {
-    _init(panel) {
-        super._init({style_class: 'tg-chart', height: CHART_H});
-        this._p = panel;
-        this._t0 = 0;
-        this._progress = 1;
-    }
-
-    startDrawIn() {
-        this._t0 = GLib.get_monotonic_time();
-        this._progress = 0;
-        if (this._morphId)
-            GLib.source_remove(this._morphId);
-        this._morphId = GLib.timeout_add(GLib.PRIORITY_LOW, 25, () => {
-            const k = (GLib.get_monotonic_time() - this._t0) / 1e6 / 0.6;
-            this._progress = Math.min(1, k);
-            this.queue_repaint();
-            if (k >= 1) {
-                this._morphId = 0;
-                return GLib.SOURCE_REMOVE;
-            }
-            return GLib.SOURCE_CONTINUE;
-        });
-    }
-
-    vfunc_repaint() {
-        let [width, height] = this.get_surface_size();
-        if (width <= 0 || height <= 0)
-            return;
-        const p = this._p;
-        const cr = this.get_context();
-        cr.setOperator(Cairo.Operator.CLEAR);
-        cr.paint();
-        cr.setOperator(Cairo.Operator.OVER);
-        const hist = p._hist;
-        if (!hist?.points?.length)
-            return;
-        const intraday = INTRADAY.has(hist.range);
-        paintChart(cr, {
-            w: width, h: height,
-            points: hist.points,
-            mode: p._style,
-            prevClose: hist.range === '1d' ? hist.meta.prevClose : null,
-            dark: p._dark,
-            fmtY: v => fmtPrice(v, hist.meta.currency),
-            fmtX: t => intraday ? fmtTime(t, hist.meta.tz)
-                                : axisDate(t, (hist.points[hist.points.length - 1].t - hist.points[0].t) / 86400),
-            progress: this._progress,
-        });
-    }
-
-    destroy() {
-        if (this._morphId)
-            GLib.source_remove(this._morphId);
-        super.destroy?.();
-    }
-});
-
 /* a tiny non-animated sparkline for watchlist rows */
 const MiniSpark = GObject.registerClass(
 class MiniSpark extends St.DrawingArea {
@@ -190,12 +126,9 @@ const stateIcon = {
 };
 
 export class TickerPanel {
-    constructor({dark, onHero, onRefresh}) {
+    constructor({dark, onRefresh}) {
         this._dark = dark;
-        this._onHero = onHero;
         this._onRefresh = onRefresh;
-        this._hist = null;          // {symbol, range, points, meta}
-        this._style = 'area';
         this._clockId = 0;
         this.actor = new St.BoxLayout({style_class: 'tg-content',
                                        vertical: true});
@@ -270,27 +203,25 @@ export class TickerPanel {
         hero.add_child(pcol);
         m.add_child(hero);
 
-        /* chart + range chips */
-        this._chart = new ChartArea(this);
-        m.add_child(this._chart);
-        const tabs = new St.BoxLayout({style_class: 'tg-tabs'});
-        this._tabBtns = {};
-        for (const r of RANGES) {
-            const b = new St.Button({style_class: 'tg-tab', can_focus: true});
-            b.set_child(new St.Label({text: RANGE_LABEL[r],
-                                       style_class: 'tg-tab-label'}));
-            b.connect('clicked', () => {
-                this.onRange?.(r);
-            });
-            tabs.add_child(b);
-            this._tabBtns[r] = b;
-        }
-        this._tabs = tabs;
-        m.add_child(tabs);
-
         /* symbol rows */
         this._rows = new St.BoxLayout({vertical: true, style_class: 'tg-rows'});
         m.add_child(this._rows);
+
+        /* open the desktop app — the card is a glance; the window is
+         * where the depth lives (charts, compare, news, organize) */
+        this._openAppBtn = new St.Button({style_class: 'tg-open-app',
+                                          can_focus: true,
+                                          x_expand: true});
+        const oa = new St.BoxLayout({style_class: 'tg-open-app-row',
+                                     x_align: Clutter.ActorAlign.CENTER});
+        oa.add_child(new St.Icon({icon_name: 'system-run-symbolic',
+                                  icon_size: 16}));
+        oa.add_child(new St.Label({text: _('Open TickerGlass'),
+                                   style_class: 'tg-open-app-label',
+                                   y_align: Clutter.ActorAlign.CENTER}));
+        this._openAppBtn.set_child(oa);
+        this._openAppBtn.connect('clicked', () => this.onOpenApp?.());
+        m.add_child(this._openAppBtn);
 
         /* footer */
         const foot = row();
@@ -328,7 +259,6 @@ export class TickerPanel {
         this._state = state;
         this._wl = state.watchlists;
         this._active = state.active;
-        this._style = state.chartStyle ?? 'area';
 
         if (state.error === 'rate') {
             this._showBody(false);
@@ -378,13 +308,6 @@ export class TickerPanel {
             this._statusLbl.remove_style_class_name('tg-status-shut');
             this._statusLbl.add_style_class_name(st.on ? 'tg-status-open'
                                                        : 'tg-status-shut');
-        }
-
-        // range tab selection
-        for (const [r, b] of Object.entries(this._tabBtns)) {
-            b.remove_style_class_name('tg-tab-active');
-            if (r === state.range)
-                b.add_style_class_name('tg-tab-active');
         }
 
         this._buildRows(state);
@@ -445,7 +368,10 @@ export class TickerPanel {
     _mkRow(q, selected) {
         const btn = new St.Button({style_class: 'tg-row' +
                                     (selected ? ' tg-row-sel' : ''),
-                                   can_focus: true});
+                                   can_focus: true,
+                                   // 100% of the card: the hover pill
+                                   // should span the menu, not hug text
+                                   x_expand: true, x_fill: true});
         const tile = col('tg-row-tile');
         const top = row();
         top.add_child(label(q.symbol.replace(/^\^/, ''), 'tg-row-sym'));
@@ -481,33 +407,13 @@ export class TickerPanel {
         return btn;
     }
 
-    /** extension.js hands over history for hero+range (or null on failure) */
-    setHeroSeries(hist) {
-        this._hist = hist;
-        this._chart.startDrawIn();
-    }
-
-    /** called after render/settings change: fetch if the current hero+range
-     *  isn't loaded yet */
-    ensureHero(reload = false) {
-        const s = this._state;
-        if (!s?.hero)
-            return;
-        if (!reload && this._hist?.symbol === s.hero &&
-            this._hist?.range === s.range)
-            return;
-        this._onHero?.(s.hero, s.range);
-    }
-
     setDark(dark) {
         this._dark = dark;
-        this._chart?.queue_repaint();
     }
 
     destroy() {
         if (this._clockId)
             GLib.source_remove(this._clockId);
-        this._chart?.destroy?.();
         this.actor.destroy();
     }
 }

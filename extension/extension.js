@@ -84,18 +84,16 @@ class TickerIndicator extends PanelMenu.Button {
         // dropdown card
         this._panel = new TickerPanel({
             dark: this._dark,
-            onHero: (symbol, range) => this._loadHero(symbol, range),
             onRefresh: () => this._fetch(true),
-            onSettled: () => {},
         });
         const section = new PopupMenu.PopupMenuSection();
         section.actor.add_child(this._panel.actor);
         this.menu.addMenuItem(section);
-        this._panel.onRange = r =>
-            this._settings.set_string('chart-range', r);
         // a mover row is a jump-off: point the app at the first
-        // watchlist containing that ticker, then bring its window up
+        // watchlist containing that ticker, then bring its window up;
+        // the footer button is the same launch without the re-point
         this._panel.onOpenSym = sym => this._openInApp(sym);
+        this._panel.onOpenApp = () => this._launchApp();
         this.menu.actor.add_style_class_name('tg-menu');
         for (let a = this._panel.actor; a; a = a.get_parent()) {
             a.set_style('padding: 0px; margin: 0px; border-width: 0px;');
@@ -110,7 +108,6 @@ class TickerIndicator extends PanelMenu.Button {
                 if (this._ageSec() > 25)
                     this._fetch(true);
                 this._panel.render(this._state());
-                this._panel.ensureHero();
             } else {
                 this._restartTimer();
             }
@@ -149,8 +146,6 @@ class TickerIndicator extends PanelMenu.Button {
             hero: this._heroSymbol(),
             watchlists: parseWatchlists(this._settings.get_string('watchlists')),
             active: this._settings.get_string('active-watchlist'),
-            range: this._settings.get_string('chart-range'),
-            chartStyle: this._settings.get_string('chart-style'),
             atWall: this._atWall,
             error: this._error,
             retryIn: this._client.retryIn(),
@@ -200,7 +195,6 @@ class TickerIndicator extends PanelMenu.Button {
                 this._busy = false;
                 this._renderPanel();
                 this._panel.render(this._state());
-                this._panel.ensureHero();
                 this._restartTimer();
                 if (this._refetch) {
                     this._refetch = false;
@@ -244,11 +238,11 @@ class TickerIndicator extends PanelMenu.Button {
         this._lTri.setDim(!live);
     }
 
-    /* hand a symbol to the desktop app: activate the first watchlist
-     * (in the user's list order) that contains it, select it, then
-     * launch — GApplication forwards the activate to a running
-     * instance, so this focuses the window instead of doubling it.
-     * The app watches both settings keys, so a running instance
+    /* the two worlds of "open the app": plain launch, or first point
+     * the window at the first watchlist (in the user's list order)
+     * containing a symbol. GApplication forwards the activate to a
+     * running instance, so this focuses the window instead of doubling
+     * it; the app watches both settings keys, so a running instance
      * re-points itself without a restart */
     _openInApp(sym) {
         const lists = parseWatchlists(this._settings.get_string('watchlists'));
@@ -256,6 +250,10 @@ class TickerIndicator extends PanelMenu.Button {
         if (wl && this._settings.get_string('active-watchlist') !== wl.id)
             this._settings.set_string('active-watchlist', wl.id);
         this._settings.set_string('selected-symbol', sym);
+        this._launchApp();
+    }
+
+    _launchApp() {
         try {
             const info = Gio.AppInfo.get_all().find(
                 a => a.get_id() === APP_DESKTOP_ID);
@@ -272,24 +270,6 @@ class TickerIndicator extends PanelMenu.Button {
             ['gjs', '-m', GLib.build_filenamev([GLib.get_home_dir(),
                 '.local', 'share', 'tickerglass', 'main.js'])],
             Gio.SubprocessFlags.NONE);
-    }
-
-    async _loadHero(symbol, range) {
-        if (!symbol)
-            return;
-        try {
-            const hist = await this._client.history(
-                symbol, range, this._settings.get_string('chart-interval'));
-            if (this._dead || this._heroSymbol() !== symbol ||
-                this._settings.get_string('chart-range') !== range)
-                return;
-            this._panel.setHeroSeries(hist);
-        } catch (e) {
-            if (this._dead)
-                return;
-            logError(e, 'TickerGlass');
-            this._panel.setHeroSeries(null);
-        }
     }
 
     /* ── timers & settings ────────────────────────────────────────────── */
@@ -323,12 +303,6 @@ class TickerIndicator extends PanelMenu.Button {
             break;
         case 'selected-symbol':
             this._panel.render(this._state());
-            this._panel.ensureHero();
-            break;
-        case 'chart-range':
-        case 'chart-interval':
-            this._panel.render(this._state());
-            this._panel.ensureHero(true);
             break;
         case 'data-source':
             this._client.setSource(this._settings.get_string('data-source'));

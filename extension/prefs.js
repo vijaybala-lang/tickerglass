@@ -261,6 +261,8 @@ export default class TickerGlassPrefs extends ExtensionPreferences {
         page.add(g1);
 
         const g2 = new Adw.PreferencesGroup({title: _('Chart defaults')});
+        g2.description = _('The dropdown has no chart anymore — these ' +
+            'shape the app\u2019s big chart.');
         const styleIds = ['area', 'line', 'candles'];
         const styleRow = new Adw.ComboRow({
             title: _('Style'),

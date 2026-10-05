@@ -41,12 +41,11 @@
 
 .tg-content {
   width: 330px;
-  min-height: 380px;
   border-radius: 18px;
-  padding: 12px 0 8px 0;      /* rows pad themselves 14px; chart bleeds */
+  padding: 12px 0 8px 0;      /* tiles span the card; text insets inside */
 }
 
-.tg-placeholder { min-height: 360px; }
+.tg-placeholder { min-height: 160px; }
 .tg-placeholder-text { color: rgba(255, 255, 255, 0.66); }
 
 /* ── rows layout ────────────────────────────────────────────────────────── */
@@ -81,18 +80,21 @@
 .tg-pill-down { background-color: rgba(224, 87, 92, 0.20);
                 color: #ff7a80; border: 1px solid rgba(224, 87, 92, 0.4); }
 
-/* ── range chips ────────────────────────────────────────────────────────── */
-.tg-tabs { padding: 2px 14px 6px; spacing: 6px; }
-.tg-tab { border-radius: 99px; padding: 2px 11px; background-color: transparent;
-          border: 1px solid rgba(255, 255, 255, 0.14); }
-.tg-tab:hover { background-color: rgba(255, 255, 255, 0.10); }
-.tg-tab-label { font-size: 0.8em; font-weight: 600; }
-.tg-tab-active { background-color: rgba(255, 255, 255, 0.22);
-                 border-color: rgba(255, 255, 255, 0.30); }
-.tg-chart { margin: 0; }
+/* ── symbol rows ──────────────────────────────────────────────────────────
+ * no horizontal padding: tiles own the full card width (hover pills
+ * included); the text inset lives inside .tg-rowbox */
+.tg-rows { padding: 4px 0 2px; spacing: 1px; }
+/* ── open-app button ────────────────────────────────────────────────────
+ * the card is a glance; the window is the destination */
+.tg-open-app { margin: 6px 10px 0; border-radius: 99px;
+               background-color: rgba(255, 255, 255, 0.08);
+               border: 1px solid rgba(255, 255, 255, 0.12); }
+.tg-open-app:hover { background-color: rgba(255, 255, 255, 0.16); }
+.tg-open-app:active { background-color: rgba(255, 255, 255, 0.22); }
+.tg-open-app:focus { border-color: rgba(255, 255, 255, 0.35); }
+.tg-open-app-row { spacing: 8px; padding: 6px 0; }
+.tg-open-app-label { font-weight: 700; font-size: 0.85em; }
 
-/* ── symbol rows ────────────────────────────────────────────────────────── */
-.tg-rows { padding: 4px 8px 2px; spacing: 1px; }
 /* ── movers sections ────────────────────────────────────────────────────
  * small colored headers above the two row blocks; the rows themselves
  * wear .tg-row and get hover/press feedback — they launch the app */
@@ -110,7 +112,7 @@
 .tg-row:focus { border-color: rgba(255, 255, 255, 0.25); }
 .tg-row-sel { background-color: rgba(16, 20, 28, 0.45);
               border-color: rgba(255, 255, 255, 0.18); }
-.tg-rowbox { spacing: 10px; padding: 5px 8px; }
+.tg-rowbox { spacing: 10px; padding: 6px 14px; }
 /* the app tile: top line = symbol | sparkline (fills) | price,
  * pct row = shared triangle asset + percent; name dim underneath */
 .tg-row-tile { spacing: 0; }
@@ -119,7 +121,7 @@
 .tg-row-spark { margin-right: 2px; }
 .tg-row-sym { font-weight: 600; font-size: 0.9em; }
 .tg-row-name { font-size: 0.75em; color: rgba(255, 255, 255, 0.55);
-               padding: 0 8px; }
+               padding: 0 14px 2px; }
 .tg-row-price { font-weight: 600; font-size: 0.9em; }
 .tg-row-pct { font-size: 0.75em; font-weight: 600; }
 .tg-rows .tg-up { color: #46d98b; }
