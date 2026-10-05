@@ -259,6 +259,15 @@ class TickerWindow extends Adw.ApplicationWindow {
         // history, movers screener — in-flight dedup + TTL cache live
         // here, not in per-call-site fields
         this._fetcher = new DataFetcher();
+        // the source-health menu section repaints itself (coalesced)
+        // whenever a real fetch settles — a shifted endpoint becomes
+        // user-visible instead of a mystery row of dashes
+        this._fetcher.onHealth = () => {
+            this._healthDirty = true;
+        };
+        this._healthDirty = false;
+        this._healthCats = ['quotes', 'hist', 'movers', 'news', 'stats'];
+        this._healthLbls = null;
         this._hist = null;
         this._quotes = [];
         this._launcher = new Gtk.UriLauncher();
@@ -411,7 +420,7 @@ class TickerWindow extends Adw.ApplicationWindow {
                 .get_child('hicolor').get_child('scalable')
                 .get_child('actions').get_path();
             Gtk.IconTheme.get_for_display(this.get_display())
-                .add_search_path(idir, -1);
+                .add_search_path(idir);
         } catch (e) {
             log(`icon path unavailable: ${e.message}`);
         }
@@ -1361,7 +1370,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         return this._toasts;
     }
 
-    _menuBtn() {
+    _buildMenu() {
         const menu = new Gio.Menu();
         menu.append('Refresh', 'win.refresh');
         menu.append('Preferences…', 'win.prefs');
@@ -1380,6 +1389,18 @@ class TickerWindow extends Adw.ApplicationWindow {
         src.append('Demo (offline)', 'win.source::demo');
         menu.append_section('Data source', src);
 
+        // source health: five inert status labels (disabled items —
+        // GMenu renders no-action entries as dim text) + a recheck
+        // trigger. The whole model is rebuilt by _paintHealthMenu
+        // when the text moves (Gio.Menu exposes no in-place mutation
+        // to GJS), so a dead endpoint reads "Stats ✗ 4m ago — 429…"
+        // instead of a silent row of dashes
+        const health = new Gio.Menu();
+        for (const l of this._healthLabels())
+            health.append(l, null);
+        health.append('Recheck now', 'win.healthRecheck');
+        menu.append_section('Source health', health);
+
         const theme = new Gio.Menu();
         theme.append('Follow system', 'win.theme::default');
         theme.append('Light', 'win.theme::light');
@@ -1397,12 +1418,71 @@ class TickerWindow extends Adw.ApplicationWindow {
         menu.append_section('Sort by', sort);
 
         menu.append('About TickerGlass', 'win.about');
+        return menu;
+    }
 
+    _menuBtn() {
         const btn = new Gtk.MenuButton({
             icon_name: 'open-menu-symbolic', tooltip_text: 'Menu',
         });
-        btn.set_menu_model(menu);
+        this._menuBtnRef = btn;
+        btn.set_menu_model(this._buildMenu());
+        // repaint the health rows the moment the menu is touched —
+        // the 30s tick alone could show a stale line for one interval
+        btn.connect('notify::active', () => {
+            this._healthDirty = false;
+            this._paintHealthMenu();
+        });
+        // repaint at most every 30s, and only when something settled
+        if (!this._healthTick)
+            this._healthTick = GLib.timeout_add_seconds(
+                GLib.PRIORITY_LOW, 30, () => {
+                    if (this._dead)
+                        return GLib.SOURCE_REMOVE;
+                    if (this._healthDirty) {
+                        this._healthDirty = false;
+                        this._paintHealthMenu();
+                    }
+                    return GLib.SOURCE_CONTINUE;
+                });
         return btn;
+    }
+
+    /* the five prose lines, straight off the fetcher's settle ledger */
+    _healthLabels() {
+        const NAMES = {quotes: 'Quotes', hist: 'History',
+                       movers: 'Movers', news: 'News', stats: 'Stats'};
+        const by = {};
+        for (const r of this._fetcher.health())
+            by[r.cat] = r;
+        const ago = at => {
+            const s = Math.max(0, GLib.get_real_time() / 1e6 - at);
+            return s < 10 ? 'just now' : s < 90 ? `${s | 0}s ago`
+                : s < 5400 ? `${Math.round(s / 60)}m ago`
+                           : `${Math.round(s / 3600)}h ago`;
+        };
+        return this._healthCats.map(cat => {
+            const r = by[cat];
+            return r
+                ? r.ok
+                    ? `${NAMES[cat]}  ✓ ${r.ms} ms · ${ago(r.at)}`
+                    : `${NAMES[cat]}  ✗ ${ago(r.at)} — ${r.err}`
+                : `${NAMES[cat]}  ·  waiting`;
+        });
+    }
+
+    /* Gio.Menu is immutable where GJS can reach (items_change is a
+     * GMenuModel method this binding does not surface — probe-proven),
+     * so repaint = rebuild the whole model and hand it over. Cheap at
+     * sixty items, and the same-label guard keeps mid-open churn to
+     * the rare round that actually moved a line */
+    _paintHealthMenu() {
+        const lbls = this._healthLabels();
+        if (this._healthLbls &&
+                this._healthLbls.every((l, i) => l === lbls[i]))
+            return;
+        this._healthLbls = lbls;
+        this._menuBtnRef?.set_menu_model(this._buildMenu());
     }
 
     _intervalMenu() {
@@ -1433,6 +1513,23 @@ class TickerWindow extends Adw.ApplicationWindow {
             // every TTL cache (movers, history), then round quotes
             this._fetcher.invalidate();
             this._refresh(true);
+        });
+        // bigger sibling of refresh for the source-health section:
+        // every deferred surface (stats backoff, top-news stamp)
+        // loses its brake too, so “Recheck now” really rechecks
+        act('healthRecheck', null, () => {
+            this._fetcher.invalidate();
+            this._statsFail = null;
+            this._histKey = null;
+            this._cmpKey = null;
+            this._topNews = null;
+            this._refresh(true);
+            this._loadHistory();
+            this._loadCompare();
+            this._refreshMovers?.();
+            if (this._stack?.get_visible_child_name() === 'news')
+                this._loadTopNews();
+            this._toast('Rechecking every source…');
         });
         act('readerback', null, () => this._leaveReader());
         act('search', null, () => {
@@ -4433,6 +4530,10 @@ class TickerWindow extends Adw.ApplicationWindow {
             GLib.source_remove(this._timer);
         if (this._morphId)
             GLib.source_remove(this._morphId);
+        if (this._healthTick) {
+            GLib.source_remove(this._healthTick);
+            this._healthTick = 0;
+        }
         // persist the WATCHLIST preference, not Movers' transient
         // collapse (the notify handler keeps the setting in sync for
         // every non-movers state anyway)

@@ -27,6 +27,8 @@
  *    every round must hit the network, but joiners still dedup)
  *  - force: bypass cache AND join (explicit user refresh)
  *  - invalidate(prefix): source switches / manual refresh purge
+ *  - health(): per key-prefix {ok, at, ms, err} of the last REAL
+ *    (non-cache, non-join) settle — the source-health menu reads it
  *
  * It deliberately does NOT do: scheduling, retry/backoff (the
  * client owns rate-limit backoff), or streaming — onQuote callbacks
@@ -40,6 +42,8 @@ export class DataFetcher {
     constructor() {
         this._inflight = new Map();   // key → promise
         this._cache = new Map();      // key → {at, value}
+        this._health = new Map();     // key-prefix → settle record
+        this.onHealth = null;         // set by the UI: called on record
     }
 
     /**
@@ -57,18 +61,41 @@ export class DataFetcher {
             if (fly)
                 return fly;
         }
+        const cat = key.split(':')[0];
+        const t0 = nowS();
         const p = Promise.resolve().then(producer).then(
             v => {
                 this._inflight.delete(key);
                 this._cache.set(key, {at: nowS(), value: v});
+                this._note(cat, true, nowS() - t0, null);
                 return v;
             },
             e => {
                 this._inflight.delete(key);
+                this._note(cat, false, nowS() - t0, e);
                 throw e;
             });
         this._inflight.set(key, p);
         return p;
+    }
+
+    /* the last REAL settle per category (cache hits and joiners are
+     * invisible — health means "when did the wire last answer") */
+    _note(cat, ok, secs, err) {
+        this._health.set(cat, {
+            ok,
+            at: GLib.get_real_time() / 1e6,        // wall: age across idle
+            ms: Math.round(secs * 1000),
+            err: ok ? null
+                : String(err?.message ?? err ?? 'error')
+                    .replace(/\s+/g, ' ').slice(0, 70),
+        });
+        if (this.onHealth)
+            try { this.onHealth(cat); } catch { /* UI not wired */ }
+    }
+
+    health() {
+        return [...this._health].map(([cat, r]) => ({cat, ...r}));
     }
 
     /* last settled value, fresh or not (stale-while-revalidate UIs
