@@ -1,3 +1,20 @@
+/* window.js — part of TickerGlass
+ * Copyright (C) 2026 Vijay Bala
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
 /* window.js — the whole TickerGlass app UI.
  * Layout: OverlaySplitView(sidebar(watchlist dropdown + sparkline rows) |
  * toast overlay(headerbar + ViewStack(chart page: hero + cairo chart +
@@ -4236,7 +4253,7 @@ class TickerWindow extends Adw.ApplicationWindow {
             version: '0.1',
             developer_name: 'vijaybala',
             website: 'https://vijaybala.dev',
-            license_type: Gtk.License.GPL_2_0,
+            license_type: Gtk.License.GPL_3_0,
             comments: 'Sparkline market watch — quotes by Yahoo Finance ' +
                 'or Nasdaq. ' +
                       'Pairs live with the GNOME Shell extension of the ' +

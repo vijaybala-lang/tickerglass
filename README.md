@@ -121,4 +121,11 @@ gjs -m tools/preview.mjs         # painter regression PNGs → /tmp/tickerglass-
 
 ## License
 
-GPL-2.0-or-later — see `LICENSE`.
+GPL-3.0-or-later — see `LICENSE`. Every source file carries the
+matching SPDX notice.
+
+**Data disclaimer:** the market data this app reads comes from
+*unofficial*, undocumented web endpoints of Yahoo Finance and Nasdaq —
+no endorsement or affiliation with either, and no redistribution
+rights in the data itself. The GPL covers the code, not the feed:
+use it as a personal ticker, not as a data pipeline others depend on.
