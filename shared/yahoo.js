@@ -470,6 +470,13 @@ export class YahooClient {
      *  Returns null when nothing decodes — every consumer treats
      *  missing stats as "hide the extras", never as an error. */
     async stats(symbol) {
+        // the reader relay holds no cookies, so quoteSummary's crumb is
+        // unReachable through it — but the fundamentals-timeseries
+        // endpoint answers the relay's clean IP keyless (probe-
+        // verified); the wrapper chrome around the answer is trimmed by
+        // _get's cut-to-first-{ defence
+        if (this._relay)
+            return this._statsViaRelay(symbol);
         if (!this._crumb && !this._relay) {
             this._crumbBoot ??= this._bootstrapCrumb();
             await this._crumbBoot;
@@ -534,6 +541,38 @@ export class YahooClient {
             blurb: blurb ? blurb.split(/\n/)[0] : null,
             earningsNext: dates.length ? Math.min(...dates) : null,
         };
+    }
+
+    /* keyless via relay: Yahoo's fundamentals chart endpoint. Types
+     * are picky AND selfish — quarterlyMarketCap answers, but adding
+     * trailingPeRatio to the same call silently drops it (probe-
+     * verified), so each type gets its own request, raced together. */
+    async _statsViaRelay(symbol) {
+        const nowE = Math.floor(GLib.get_real_time() / 1e6);
+        const base = 'https://query1.finance.yahoo.com/ws/fundamentals-' +
+            `timeseries/v1/finance/timeseries/${encodeURIComponent(symbol)}` +
+            `?period1=${nowE - 4 * 365 * 86400}&period2=${nowE}&type=`;
+        const pull = async type => {
+            try {
+                const d = await this._try(`stats~ ${type}`, base + type,
+                    {deadline: 25});
+                const res = d?.timeseries?.result?.[0];
+                // flat shape: result[0][type] = rows (no indicators node
+                // on this endpoint variant)
+                const rows = res?.[type] ?? [];
+                for (let i = rows.length - 1; i >= 0; i--)
+                    if (rows[i]?.reportedValue?.raw != null)
+                        return rows[i].reportedValue.raw;
+            } catch { /* this stat stays null */ }
+            return null;
+        };
+        const [marketCap, pe] = await Promise.all([
+            pull('quarterlyMarketCap'), pull('trailingPeRatio')]);
+        if (marketCap == null && pe == null)
+            return null;
+        return {symbol, marketCap, pe, divYield: null, avgVolume: null,
+            beta: null, peg: null, sector: null, industry: null,
+            employees: null, blurb: null, earningsNext: null};
     }
 
     /* ── market movers ─────────────────────────────────────────────────── */
@@ -1169,18 +1208,50 @@ export class NasdaqClient {
         return this._back.topNews();
     }
 
-    /* stats ride Yahoo as well: direct first (its crumb pairs with its
-     * own cookies — the relayed client can't reuse them), relay after */
+    /* stats: Nasdaq's own summary endpoint answers keyless and
+     * directly (same headers as the quote rounds — probe-verified),
+     * serving sector/industry/mcap/yield/avg-volume. It carries no
+     * P/E, so the relay's keyless timeseries backfills what's
+     * missing. Yahoo's quoteSummary (crumb-gated, and both the crumb
+     * endpoint and quoteSummary itself 401/429 our egress direct —
+     * probed) is deliberately not a shot here. */
     async stats(symbol) {
-        this._statsShots ??= [new YahooClient(), this._back];
-        for (const c of this._statsShots) {
+        const out = {symbol, marketCap: null, pe: null, divYield: null,
+            avgVolume: null, beta: null, peg: null, sector: null,
+            industry: null, employees: null, blurb: null,
+            earningsNext: null};
+        const num = v => {
+            if (!v || /N\/A|^—$/.test(v))
+                return null;
+            const x = +v.replace(/[$,%\s]/g, '').replace(/,/g, '');
+            return Number.isFinite(x) ? x : null;
+        };
+        try {
+            const d = await this._try(
+                `/api/quote/${encodeURIComponent(symbol)}/summary` +
+                `?assetclass=${this._ac?.(symbol) === 'etf' ? 'etf'
+                    : 'stocks'}`);
+            const s = d?.data?.summaryData ?? {};
+            const val = k => s[k]?.value ?? null;
+            out.marketCap = num(val('MarketCap'));
+            out.avgVolume = num(val('AverageVolume'));
+            const y = num(val('Yield'));              // '0.33%' → 0.0033
+            out.divYield = y != null ? y / 100 : null;
+            out.sector = val('Sector');
+            out.industry = val('Industry');
+        } catch { /* summary is garnish */ }
+        if (out.marketCap == null || out.pe == null) {
             try {
-                const s = await c.stats(symbol);
-                if (s)
-                    return s;
-            } catch { /* next */ }
+                const y = await this._back.stats(symbol);   // relayed
+                if (y) {
+                    for (const [k, v] of Object.entries(y))
+                        if (out[k] == null && v != null)
+                            out[k] = v;
+                }
+            } catch { /* neither source answered */ }
         }
-        return null;
+        return Object.entries(out).some(([k, v]) =>
+            k !== 'symbol' && v != null) ? out : null;
     }
 
     /* screeners are Yahoo-side: Nasdaq's own screener endpoints are
