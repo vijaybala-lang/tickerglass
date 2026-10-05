@@ -242,12 +242,15 @@ list row { border-radius: 12px; }
 
 /* news: individual cards instead of a flat list */
 .tg-news-list { padding: 0 2px; }
+/* pills wore a 4% currentcolor wash — indistinguishable from the
+ * window on both themes (reads as transparent). 6% reads as a soft
+ * card without competing with the hero; hover doubles it */
 .tg-news-list row {
-  background: alpha(currentcolor, 0.04);
+  background: alpha(currentcolor, 0.06);
   border-radius: 14px;
   margin: 4px 6px;
 }
-.tg-news-list row:hover { background: alpha(currentcolor, 0.08); }
+.tg-news-list row:hover { background: alpha(currentcolor, 0.13); }
 
 /* movers tiles: FlowBox children stay transparent, the card lives on
  * the tile itself so hover/rounding reads as one object. Descendant

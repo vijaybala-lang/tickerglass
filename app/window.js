@@ -889,7 +889,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         // untouched; FlowBox children are flowchild nodes the movers
         // tile CSS needed a small campaign to tame.
         const tnCols = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
-                                    spacing: 4});
+                                    spacing: 4, homogeneous: true});
         this._topNewsList = new Gtk.ListBox({css_classes: ['tg-news-list']});
         this._topNewsList.add_css_class('flat');
         this._topNewsList.set_hexpand(true);
