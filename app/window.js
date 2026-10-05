@@ -488,11 +488,10 @@ class TickerWindow extends Adw.ApplicationWindow {
         // shown only while the hero is a search-preview not yet in the
         // list — rides the badge (chips) line, sized to sit beside the
         // range chips rather than shout over the price
-        // split button in the sidebar's .linked recipe: the add zone
-        // and the caret are two FUSED segments — a real MenuButton,
-        // not a hit-zone faked inside one widget (the old
-        // position-routing gesture + hairline divider are gone; the
-        // theme draws the seam)
+        // THE SAME COMPONENT as the sidebar's bar: a .linked box of
+        // plain theme-default buttons (+ a MenuButton for the caret)
+        // — no custom css classes at all, same 24px metrics the
+        // probe measured for sidebar/titlebar clusters
         this._addBtn = new Gtk.Box({css_classes: ['linked'],
                                     valign: Gtk.Align.CENTER});
         {
@@ -506,7 +505,6 @@ class TickerWindow extends Adw.ApplicationWindow {
                 inner.append(new Gtk.Label({label: 'Add to List'}));
                 addMain.set_child(inner);
             }
-            addMain.add_css_class('tg-add');
             addMain.set_focus_on_click(false);
             addMain.connect('clicked', () =>
                 this._addSymbol(this._hero()));
@@ -519,8 +517,6 @@ class TickerWindow extends Adw.ApplicationWindow {
                 valign: Gtk.Align.CENTER,
                 tooltip_text: 'Choose which list',
             });
-            addCaret.add_css_class('tg-add');
-            addCaret.add_css_class('tg-add-caret');
             this._addBtn.append(addMain);
             this._addBtn.append(addCaret);
         }

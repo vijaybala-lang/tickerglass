@@ -130,21 +130,9 @@ window { font-family: Inter, Cantarell, sans-serif; }
 
 /* the preview's commit button: green pill on the badge line, sized to
  * sit with the range chips instead of towering over the price */
-.tg-add {
-  /* sidebar button-bar style: theme-default chrome (the .linked
-   * cluster look), no accent skin. Only custom values are the
-   * vertical padding — trimmed to sit in the hero chip row — and
-   * the label voice shared with the nav cluster */
-  padding: 2px 12px;
-  font-size: 0.85em;
-  font-weight: 600;
-}
-/* caret segment of the split add button: same vertical rhythm as
- * the label segment, tighter horizontally around the arrow */
-.tg-add-caret {
-  padding-left: 7px;
-  padding-right: 9px;
-}
+/* (.tg-add / .tg-add-caret retired: the hero add button now uses the
+ * bare .linked cluster component — zero custom classes, like the
+ * sidebar bar) */
 /* Manage pill while Remove-tickers mode is ON. Mimics libadwaita's
  * :checked button — a soft alpha wash of the foreground ink that
  * adapts light/dark automatically (the old 2px 55%-black ring read
