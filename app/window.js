@@ -1025,10 +1025,30 @@ class TickerWindow extends Adw.ApplicationWindow {
             });
             this._loadSpin = new Gtk.Spinner();
             this._loadPill.append(this._loadSpin);
-            this._loadPill.append(new Gtk.Label({
-                label: 'Updating quotes…', css_classes: ['caption']}));
+            this._loadLbl = new Gtk.Label({label: 'Updating quotes…',
+                                           css_classes: ['caption']});
+            this._loadPill.append(this._loadLbl);
             this._loadPill.set_visible(false);
+            // code-side margin: CSS margin would outrank
+            // set_margin_top, and the sling animates this value
+            this._loadPill.set_margin_top(8);
             symOv.add_overlay(this._loadPill);
+            // sling-to-refresh: wheel/pad scroll UP while already at
+            // the top drags the pill down like a rubber band; past
+            // the threshold the refresh fires itself (the "release"
+            // on a wheel is implicit — events just stop). Captured
+            // so we see the deltas before the list consumes them;
+            // scroll events never fight the row GestureDrag (that's
+            // reorder's territory).
+            {
+                const sling = new Gtk.EventControllerScroll({
+                    propagation_phase: Gtk.PropagationPhase.CAPTURE,
+                    flags: Gtk.EventControllerScrollFlags.VERTICAL,
+                });
+                sling.connect('scroll', (c, dx, dy) =>
+                    this._onSlingScroll(dy));
+                symScroll.add_controller(sling);
+            }
             this._ghost = new Gtk.Box({
                 css_classes: ['tg-ghost'],
                 halign: Gtk.Align.START, valign: Gtk.Align.START,
@@ -1571,6 +1591,62 @@ class TickerWindow extends Adw.ApplicationWindow {
     /* swipe-to-delete state: at most one row is open. The button takes
      * real width in the row's hbox (content compresses) — cheap and
      * flicker-free against overlays on transparent rows. */
+    /* ── sling-to-refresh ───────────────────────────────────────────
+     * Desktop translation of the mobile pull gesture: the wheel is
+     * the sling. Each UP delta felt at the very top of the list
+     * drags the loading pill down (rubber-band, saturating near the
+     * threshold); committed enough, it fires a manual refresh and
+     * the pill switches to its spinner role. Scroll down, or just
+     * stop pulling, and the band snaps back. */
+    _onSlingScroll(dy) {
+        const TH = 120;                      // px of accumulated pull
+        if (dy > 0 || this._symAdj?.get_value() > 1) {
+            this._slingCancel();             // heading down: band off
+            return false;                    // never consume
+        }
+        if (this._busy || this._slingFired)
+            return false;
+        this._sling = Math.min(TH, (this._sling || 0) +
+                               Math.abs(dy) * 30);
+        if (this._loadPill) {
+            this._loadLbl?.set_text('Pull to refresh');
+            this._loadPill.set_visible(true);
+            this._loadSpin?.stop();          // progress, not waiting
+            this._loadPill.set_margin_top(
+                8 + Math.round(44 * this._sling / TH));
+        }
+        // events are discrete — “released” means nothing arrived for
+        // a moment; at that instant a full band fires, a partial
+        // one snaps back
+        if (this._slingTimeout)
+            GLib.source_remove(this._slingTimeout);
+        this._slingTimeout = GLib.timeout_add(GLib.PRIORITY_DEFAULT,
+            180, () => {
+                this._slingTimeout = 0;
+                if (this._sling >= TH) {
+                    this._slingFired = true;
+                    this._loadLbl?.set_text('Updating quotes…');
+                    this._refresh(true);     // spinner path takes over
+                } else {
+                    this._slingCancel();
+                }
+                return GLib.SOURCE_REMOVE;
+            });
+        return false;
+    }
+
+    _slingCancel() {
+        this._sling = 0;
+        if (this._slingTimeout) {
+            GLib.source_remove(this._slingTimeout);
+            this._slingTimeout = 0;
+        }
+        if (!this._busy && this._loadPill?.get_visible() &&
+            !this._loadPend)
+            this._loadPill.set_visible(false);
+        this._loadPill?.set_margin_top(8);
+    }
+
     /* round-trip busy switch: header spinner (immediate) + the
      * sidebar's pill. The pill is DELAYED 350ms: quick rounds — most
      * polls land in well under that — never flash it, so it only
@@ -1594,6 +1670,11 @@ class TickerWindow extends Adw.ApplicationWindow {
             }
             this._loadPill?.set_visible(false);
             this._loadSpin?.stop();
+            // sling bookkeeping: band resets when the data lands,
+            // so the next sling starts fresh at the top
+            this._sling = 0;
+            this._slingFired = false;
+            this._loadPill?.set_margin_top(8);
         }
     }
 

@@ -249,7 +249,6 @@ window { font-family: Inter, Cantarell, sans-serif; }
   border: 1px solid alpha(#000000, 0.14);
   border-radius: 999px;
   padding: 4px 12px;
-  margin-top: 8px;
   box-shadow: 0 2px 8px alpha(#000000, 0.20);
 }
 
