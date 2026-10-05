@@ -988,6 +988,7 @@ class TickerWindow extends Adw.ApplicationWindow {
         });
         this._symList.add_controller(symClick);
         const symScroll = new Gtk.ScrolledWindow({vexpand: true});
+        this._symScroll = symScroll;   // the sling stretches its top margin
         // overlay over the list hosts the drag ghost chip: it is a NEW
         // widget riding an overlay — it never reparents the row under
         // the pointer grab (which is what killed the paint before)
@@ -1608,12 +1609,18 @@ class TickerWindow extends Adw.ApplicationWindow {
             return false;
         this._sling = Math.min(TH, (this._sling || 0) +
                                Math.abs(dy) * 30);
+        // the rubber band itself: with nothing below the list in the
+        // sidebar column, a live margin-top on the SCROLLER slides
+        // the whole tile stack down over the sidebar background —
+        // iOS-style stretch, pills riding along. Wheel events are
+        // discrete (~10/s), so the relayout per notch is free.
+        const px = Math.round(44 * this._sling / TH);
+        this._symScroll?.set_margin_top(px);
         if (this._loadPill) {
             this._loadLbl?.set_text('Pull to refresh');
             this._loadPill.set_visible(true);
             this._loadSpin?.stop();          // progress, not waiting
-            this._loadPill.set_margin_top(
-                8 + Math.round(44 * this._sling / TH));
+            this._loadPill.set_margin_top(8 + px);
         }
         // events are discrete — “released” means nothing arrived for
         // a moment; at that instant a full band fires, a partial
@@ -1641,10 +1648,27 @@ class TickerWindow extends Adw.ApplicationWindow {
             GLib.source_remove(this._slingTimeout);
             this._slingTimeout = 0;
         }
-        if (!this._busy && this._loadPill?.get_visible() &&
-            !this._loadPend)
-            this._loadPill.set_visible(false);
-        this._loadPill?.set_margin_top(8);
+        // recoil, not a teleport: shrink the stretch by a third every
+        // 30ms — the band visibly snaps the tiles back into place
+        const recoil = () => {
+            const m = (this._symScroll?.get_margin_top?.() ?? 0);
+            if (m <= 2) {
+                this._symScroll?.set_margin_top(0);
+                this._loadPill?.set_margin_top(8);
+                if (!this._busy && !this._loadPend)
+                    this._loadPill?.set_visible(false);
+                this._slingAnim = 0;
+                return GLib.SOURCE_REMOVE;
+            }
+            const next = Math.max(0, Math.round(m * 0.35));
+            this._symScroll?.set_margin_top(next);
+            this._loadPill?.set_margin_top(8 + next);
+            return GLib.SOURCE_CONTINUE;
+        };
+        if (this._slingAnim)
+            return;   // one recoil at a time; it will pick up new state
+        this._slingAnim = GLib.timeout_add(GLib.PRIORITY_DEFAULT,
+            30, recoil);
     }
 
     /* round-trip busy switch: header spinner (immediate) + the
@@ -1655,7 +1679,10 @@ class TickerWindow extends Adw.ApplicationWindow {
     _setSpinner(on) {
         this._spinner.set_visible(on);
         if (on) {
-            if (!this._loadPend && !this._loadPill?.get_visible())
+            if (this._loadPill?.get_visible())
+                this._loadSpin?.start();   // sling already showed it —
+                                           // spinner starts straight away
+            else if (!this._loadPend)
                 this._loadPend = GLib.timeout_add(GLib.PRIORITY_DEFAULT,
                     350, () => {
                         this._loadPend = 0;
@@ -1670,11 +1697,13 @@ class TickerWindow extends Adw.ApplicationWindow {
             }
             this._loadPill?.set_visible(false);
             this._loadSpin?.stop();
-            // sling bookkeeping: band resets when the data lands,
-            // so the next sling starts fresh at the top
+            // sling bookkeeping: the stretch is HELD while the round
+            // runs (iOS keeps the spinner area open) and released
+            // the moment data lands
             this._sling = 0;
             this._slingFired = false;
             this._loadPill?.set_margin_top(8);
+            this._symScroll?.set_margin_top(0);
         }
     }
 
