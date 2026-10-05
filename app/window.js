@@ -46,29 +46,55 @@ function favFetch(host) {
         return;
     FAV_WAIT.set(host, []);
     (async () => {
+        // probe: /favicon.ico answers 2xx for nearly every news host,
+        // but some (investing.com...) 403 the ico while serving the
+        // touch icon, and raw 404 error pages once decoded into
+        // garbage pixbufs — so: status-checked chain, best candidate
+        // first, first decoder-win wins
+        const paths = ['/favicon.ico', '/apple-touch-icon.png',
+                       '/favicon.png'];
         try {
             const { default: Soup } = await import('gi://Soup?version=3.0');
-            const sess = new Soup.Session({ timeout: 8 });
-            const msg = Soup.Message.new('GET', `https://${host}/favicon.ico`);
-            const bytes = await new Promise((res, rej) =>
-                sess.send_and_read_async(
-                    msg, GLib.PRIORITY_LOW, null, (s, r) => {
-                        try {
-                            res(s.send_and_read_finish(r));
-                        } catch (e) {
-                            rej(e);
-                        }
-                    }));
-            const st = new Gio.MemoryInputStream.new_from_bytes(bytes);
-            const pb = await new Promise((res, rej) =>
-                GdkPixbuf.Pixbuf.new_from_stream_at_scale_async(
-                    st, 36, 36, true, null, (s, r) => {
-                        try {
-                            res(GdkPixbuf.Pixbuf.new_from_stream_finish(r));
-                        } catch (e) {
-                            rej(e);
-                        }
-                    }));
+            const sess = new Soup.Session({ timeout: 8,
+                                            user_agent:
+                        'Mozilla/5.0 (X11; Linux x86_64) TickerGlass/1.0' });
+            let pb = null;
+            for (const p of paths) {
+                if (pb)
+                    break;
+                try {
+                    const msg = Soup.Message.new('GET',
+                                                 `https://${host}${p}`);
+                    const bytes = await new Promise((res, rej) =>
+                        sess.send_and_read_async(
+                            msg, GLib.PRIORITY_LOW, null, (s, r) => {
+                                try {
+                                    res(s.send_and_read_finish(r));
+                                } catch (e) {
+                                    rej(e);
+                                }
+                            }));
+                    if (msg.get_status() !== 200 || !bytes ||
+                        bytes.get_size() < 100)
+                        continue;      // not an answer — try next path
+                    const st =
+                        Gio.MemoryInputStream.new_from_bytes(bytes);
+                    pb = await new Promise((res, rej) =>
+                        GdkPixbuf.Pixbuf.new_from_stream_at_scale_async(
+                            st, 36, 36, true, null, (s, r) => {
+                                try {
+                                    res(GdkPixbuf.Pixbuf
+                                        .new_from_stream_finish(r));
+                                } catch (e) {
+                                    rej(e);
+                                }
+                            }));
+                } catch {
+                    // this path died (decode/timeout) — next path
+                }
+            }
+            if (!pb)
+                throw new Error('no favicon candidate');
             FAV.set(host, pb);
         } catch {
             FAV.set(host, null);   // letter avatar stays for good
