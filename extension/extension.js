@@ -96,7 +96,9 @@ class TickerIndicator extends PanelMenu.Button {
         this._panel.onOpenSym = sym => this._openInApp(sym);
         this._panel.onOpenApp = () => this._launchApp();
         this.menu.actor.add_style_class_name('tg-menu');
-        for (let a = this._panel.actor; a; a = a.get_parent()) {
+        // zero the popup wrappers' chrome — but start ABOVE the panel
+        // actor: .tg-content keeps its own CSS padding (4px side gut)
+        for (let a = this._panel.actor.get_parent(); a; a = a.get_parent()) {
             a.set_style('padding: 0px; margin: 0px; border-width: 0px;');
             if (a === this.menu.actor)
                 break;

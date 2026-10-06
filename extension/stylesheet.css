@@ -42,7 +42,10 @@
 .tg-content {
   width: 330px;
   border-radius: 18px;
-  padding: 12px 0 8px 0;      /* tiles span the card; text insets inside */
+  /* 4px side gut: tiles, hover pills and the open-app button float
+   * just off the card edges instead of bleeding into the rounded
+   * corners (popup wrappers are JS-zeroed; the content keeps this) */
+  padding: 12px 4px 8px 4px;
 }
 
 .tg-placeholder { min-height: 160px; }
@@ -73,15 +76,16 @@
 .tg-rows { padding: 4px 0 2px; spacing: 1px; }
 
 /* ── two-column movers board (default; prefs switch stacks it) ────────
- * wide card, gainers left / losers right. Geometry: (500 - 8 gap)/2 =
- * 246 per column; tiles and headers need column-sized min-widths —
- * St-18's Bin still centers children at natural width, JS assigns are
- * dead, CSS min-width is the only lever (see DEVELOPMENT.md) */
+ * wide card, gainers left / losers right. Geometry: content sits in a
+ * 4px side gut, so (500 - 8 gut - 8 gap)/2 = 242 per column; tiles and
+ * headers need column-sized min-widths — St-18's Bin still centers
+ * children at natural width, JS assigns are dead, CSS min-width is
+ * the only lever (see DEVELOPMENT.md) */
 .tg-content.tg-2col { width: 500px; }
 .tg-cols { spacing: 8px; }
 .tg-col { spacing: 0; }
-.tg-2col .tg-row-wrap { min-width: 222px; }
-.tg-2col .tg-sec-h { min-width: 214px; }
+.tg-2col .tg-row-wrap { min-width: 218px; }
+.tg-2col .tg-sec-h { min-width: 212px; }
 /* ── open-app button ────────────────────────────────────────────────────
  * the card is a glance; the window is the destination */
 .tg-open-app { margin: 6px 10px 0; border-radius: 99px;
@@ -101,7 +105,7 @@
             /* St-18 clamped this to a width that ellipsized 'Top
              * losers'; same min-width lever as the tiles: 302 + the
              * 28px side padding = the full 330 card */
-            min-width: 302px; }
+            min-width: 292px; }
 .tg-sec-up { color: #46d98b; }
 .tg-sec-down { color: #ff7a80; }
 .tg-nomove { color: rgba(255, 255, 255, 0.45); font-size: 0.85em;
@@ -121,7 +125,7 @@
  * in St-18 (the Bin centers its child at natural size; JS x_align
  * assigns do nothing). 308 + the 20px side padding = 328 = button
  * interior inside its 1px border — no popup overflow */
-.tg-row-wrap { spacing: 8px; padding: 0 10px; min-width: 308px; }
+.tg-row-wrap { spacing: 8px; padding: 0 10px; min-width: 300px; }
 .tg-row-left { spacing: 0; }
 .tg-row-top { spacing: 8px; padding: 5px 0 2px; }
 .tg-row-praw { spacing: 0; }
