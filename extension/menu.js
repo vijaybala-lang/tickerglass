@@ -160,9 +160,9 @@ export class TickerPanel {
         const m = new St.BoxLayout({vertical: true, style_class: 'tg-main',
                                     visible: false});
 
-        /* header: the card's one heading, market status, refresh.
-         * The watchlist name and the hero price used to live up
-         * here — both axed: this card is the movers board, and the
+        /* header: the card's one heading, market status, settings and
+         * refresh. The watchlist name and the hero price used to live
+         * up here — both axed: this card is the movers board, and the
          * app owns the per-symbol/active-list chrome */
         const head = row();
         head.style_class = 'tg-header';
@@ -170,6 +170,14 @@ export class TickerPanel {
         head.add_child(spacer());
         this._statusLbl = new St.Label({text: '', style_class: 'tg-status'});
         head.add_child(this._statusLbl);
+        /* settings rides the header next to refresh — the footer is
+         * just the clock now; the two utility buttons live together */
+        this._gearBtn = new St.Button({style_class: 'tg-icon-btn',
+                                       can_focus: true});
+        this._gearBtn.set_child(new St.Icon({icon_name: 'emblem-system-symbolic',
+                                             icon_size: 16}));
+        this._gearBtn.connect('clicked', () => this._openPrefs());
+        head.add_child(this._gearBtn);
         this._refreshBtn = new St.Button({style_class: 'tg-icon-btn',
                                           can_focus: true});
         this._refreshIcon = new St.Icon({icon_name: 'view-refresh-symbolic',
@@ -205,12 +213,6 @@ export class TickerPanel {
         this._updLbl = new St.Label({text: '', style_class: 'tg-updated'});
         foot.add_child(this._updLbl);
         foot.add_child(spacer());
-        /* one gear, not a gear + a plus: both opened the same prefs */
-        this._gearBtn = new St.Button({style_class: 'tg-icon-btn'});
-        this._gearBtn.set_child(new St.Icon({icon_name: 'emblem-system-symbolic',
-                                             icon_size: 16}));
-        this._gearBtn.connect('clicked', () => this._openPrefs());
-        foot.add_child(this._gearBtn);
         m.add_child(foot);
 
         return m;
@@ -255,8 +257,10 @@ export class TickerPanel {
                   ?? state.quotes[0];
         if (hero) {
             const st = stateIcon[hero.state] ?? stateIcon.CLOSED;
-            this._statusLbl.set_text(
-                `${_(st.txt)} · ${hero.exchange || hero.symbol}`);
+            // just the market state — the bigger title and the gear
+            // moved into this row, and '· NYSE' never informed a
+            // decision on a movers board
+            this._statusLbl.set_text(_(st.txt));
             this._statusLbl.remove_style_class_name('tg-status-open');
             this._statusLbl.remove_style_class_name('tg-status-shut');
             this._statusLbl.add_style_class_name(st.on ? 'tg-status-open'
