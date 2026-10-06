@@ -359,60 +359,54 @@ export class TickerPanel {
         }
     }
 
-    /* THE app's sidebar tile, rebuilt in St: symbol at the head of the
-     * top line, the sparkline filling the middle, the price right with
-     * triangle + percent beneath it (direction carried by the shared
-     * paintTri asset and the tg-up/tg-down colour, exactly as the app
-     * composes it), company name dim on a second line. Clicking the
+    /* THE app's sidebar tile, ported column-for-column from
+     * _rebuildSidebar's own comment: "three columns: [sym | spark]
+     * with the name as its second line on the left, and price+pct as
+     * an independent right column CENTERED against the full two-line
+     * height — so the name hugs the sparkline instead of sitting
+     * under it". The old single-top-row port broke that rhythm (name
+     * floated below the price column, spark read short). Clicking the
      * tile opens the symbol in the app. */
     _mkRow(q, selected) {
         const btn = new St.Button({style_class: 'tg-row' +
                                     (selected ? ' tg-row-sel' : ''),
-                                   can_focus: true,
-                                   // 100% of the card: x_expand + the
-                                   // default FILL align spans the box.
-                                   // NO x_fill — GNOME 50's St dropped
-                                   // the property; passing it throws
-                                   // 'No property x_fill on StButton'
-                                   // and kills render (tiles vanished)
-                                   x_expand: true});
-        const tile = col('tg-row-tile');
-        // St-18's St.Bin (Button's parent) lost x_fill entirely — it
-        // centers its child at natural width unless the CHILD claims
-        // FILL. Without this the tile sits as a shrunken island in
-        // the middle of a full-width button (screenshot-proved).
-        tile.x_align = Clutter.ActorAlign.FILL;
-        const top = row();
+                                   can_focus: true, x_expand: true});
+        const wrap = new St.BoxLayout({style_class: 'tg-row-wrap'});
+        wrap.x_align = Clutter.ActorAlign.FILL;   // St-18 Bin centers
+        const leftV = new St.BoxLayout({vertical: true,
+                                        style_class: 'tg-row-left'});
+        leftV.x_align = Clutter.ActorAlign.FILL;
+        leftV.x_expand = true;                    // the app's hexpand
+        const top = new St.BoxLayout({style_class: 'tg-row-top'});
         top.x_align = Clutter.ActorAlign.FILL;
         top.add_child(label(q.symbol.replace(/^\^/, ''), 'tg-row-sym'));
         const spark = new MiniSpark(q.spark, (q.change ?? 0) >= 0);
-        spark.x_expand = true;      // the app's hexpand: it fills
+        spark.x_expand = true;
         top.add_child(spark);
-        const praw = col('tg-row-praw');
-        praw.add_child(new St.Label({
-            text: q.price != null ? fmtPrice(q.price, q.currency) : '—',
-            style_class: 'tg-row-price',
-            x_align: Clutter.ActorAlign.END}));
-        const up = (q.change ?? q.changePct ?? 0) >= 0;
-        const pctBox = new St.BoxLayout({style_class: 'tg-row-pctbox' +
-            (q.change != null ? (up ? ' tg-up' : ' tg-down') : ''),
-                                         y_align: Clutter.ActorAlign.END});
-        pctBox.add_child(new Tri(up));
-        if (q.changePct != null) {
-            pctBox.add_child(new St.Label({
-                text: fmtPct(q.changePct),
-                style_class: 'tg-row-pct',
-                x_align: Clutter.ActorAlign.END}));
-        }
-        praw.add_child(pctBox);
-        top.add_child(praw);
-        tile.add_child(top);
+        leftV.add_child(top);
         const nm = (q.name ?? '').replace(/[\u2018\u2019'].*/g, '')
             .replace(/(Common|Corp|Inc|Holdings|Group|Plc|Ltd|Co)\.?$/i, '')
             .trim();
-        tile.add_child(label(nm.length > 26 ? nm.slice(0, 25) + '…' : nm,
-                             'tg-row-name'));
-        btn.set_child(tile);
+        leftV.add_child(label(nm.length > 26 ? nm.slice(0, 25) + '…' : nm,
+                              'tg-row-name'));
+        wrap.add_child(leftV);
+        // independent right column, centered against the two lines
+        const praw = new St.BoxLayout({vertical: true,
+                                       style_class: 'tg-row-praw',
+                                       y_align: Clutter.ActorAlign.CENTER});
+        praw.add_child(new St.Label({
+            text: q.price != null ? fmtPrice(q.price, q.currency) : '—',
+            style_class: 'tg-row-price'}));
+        const up = (q.change ?? q.changePct ?? 0) >= 0;
+        const pctBox = new St.BoxLayout({style_class: 'tg-row-pctbox' +
+            (q.change != null ? (up ? ' tg-up' : ' tg-down') : '')});
+        pctBox.add_child(new Tri(up));
+        if (q.changePct != null)
+            pctBox.add_child(new St.Label({text: fmtPct(q.changePct),
+                                           style_class: 'tg-row-pct'}));
+        praw.add_child(pctBox);
+        wrap.add_child(praw);
+        btn.set_child(wrap);
         btn.connect('clicked', () => this.onOpenSym?.(q.symbol));
         return btn;
     }
