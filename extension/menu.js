@@ -31,7 +31,7 @@ import Cairo from 'gi://cairo';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {paintMiniSpark, paintTri} from './spark.js';
-import {fmtPrice, fmtDelta, fmtPct, symbolShort} from './fmt.js';
+import {fmtPrice, fmtPct} from './fmt.js';
 import {_, N_} from './i18n.js';
 
 /* cairo ink can't read CSS — these mirror .tg-gcnt/.tg-lcnt/.tg-dim in
@@ -81,9 +81,6 @@ const label = (text, cls) => new St.Label({
     text, style_class: cls, x_align: Clutter.ActorAlign.START,
 });
 const row = () => new St.BoxLayout({style_class: 'tg-rowbox'});
-const col = (cls = '') => new St.BoxLayout({
-    vertical: true, style_class: cls, x_align: Clutter.ActorAlign.START,
-});
 
 function spacer() {
     return new St.Widget({
@@ -160,16 +157,13 @@ export class TickerPanel {
         const m = new St.BoxLayout({vertical: true, style_class: 'tg-main',
                                     visible: false});
 
-        /* header: active watchlist (read-only — the lists live in the
-         * app & prefs) • market status • refresh */
+        /* header: the card's one heading, market status, refresh.
+         * The watchlist name and the hero price used to live up
+         * here — both axed: this card is the movers board, and the
+         * app owns the per-symbol/active-list chrome */
         const head = row();
         head.style_class = 'tg-header';
-        this._wlBox = col();
-        this._wlLbl = new St.Label({text: 'Watchlist', style_class: 'tg-wl'});
-        this._wlSub = new St.Label({text: '', style_class: 'tg-wl-sub'});
-        this._wlBox.add_child(this._wlLbl);
-        this._wlBox.add_child(this._wlSub);
-        head.add_child(this._wlBox);
+        head.add_child(label(_("Today's Top Movers"), 'tg-title'));
         head.add_child(spacer());
         this._statusLbl = new St.Label({text: '', style_class: 'tg-status'});
         head.add_child(this._statusLbl);
@@ -181,27 +175,6 @@ export class TickerPanel {
         this._refreshBtn.connect('clicked', () => this._onRefresh?.());
         head.add_child(this._refreshBtn);
         m.add_child(head);
-
-        /* hero: symbol + name on the left, big price + pill right */
-        const hero = row();
-        hero.style_class = 'tg-hero';
-        const hcol = col();
-        this._heroSym = new St.Label({text: '', style_class: 'tg-hero-sym'});
-        this._heroName = new St.Label({text: '', style_class: 'tg-hero-name'});
-        hcol.add_child(this._heroSym);
-        hcol.add_child(this._heroName);
-        hero.add_child(hcol);
-        hero.add_child(spacer());
-        const pcol = new St.BoxLayout({vertical: true,
-                                       x_align: Clutter.ActorAlign.END});
-        this._heroPrice = new St.Label({text: '', style_class: 'tg-hero-price',
-                                        x_align: Clutter.ActorAlign.END});
-        this._heroPill = new St.Label({text: '', style_class: 'tg-pill'});
-        this._heroPill.set_x_align(Clutter.ActorAlign.END);
-        pcol.add_child(this._heroPrice);
-        pcol.add_child(this._heroPill);
-        hero.add_child(pcol);
-        m.add_child(hero);
 
         /* symbol rows */
         this._rows = new St.BoxLayout({vertical: true, style_class: 'tg-rows'});
@@ -257,8 +230,6 @@ export class TickerPanel {
 
     render(state) {
         this._state = state;
-        this._wl = state.watchlists;
-        this._active = state.active;
 
         if (state.error === 'rate') {
             this._showBody(false);
@@ -279,28 +250,11 @@ export class TickerPanel {
         }
         this._showBody(true);
 
-        const wl = this._wl.find(w => w.id === this._active);
-        this._wlLbl.set_text(wl?.name ?? '');
-        this._wlSub.set_text(this._wl.length > 1
-            ? _('%d lists · edit in app/⚙').format(this._wl.length)
-            : _('edit in app/⚙'));
-
+        // the headline status still rides the symbol the app has open
+        // (state.hero), falling back to the first quote
         const hero = state.quotes.find(q => q.symbol === state.hero)
                   ?? state.quotes[0];
         if (hero) {
-            this._heroSym.set_text(symbolShort(hero.symbol));
-            this._heroName.set_text([hero.name !== hero.symbol ? hero.name : '',
-                                     hero.exchange].filter(Boolean).join(' · '));
-            this._heroPrice.set_text(hero.price != null
-                ? fmtPrice(hero.price, hero.currency) : '—');
-            const up = (hero.change ?? 0) >= 0;
-            this._heroPill.remove_style_class_name('tg-pill-up');
-            this._heroPill.remove_style_class_name('tg-pill-down');
-            this._heroPill.add_style_class_name(up ? 'tg-pill-up' : 'tg-pill-down');
-            this._heroPill.set_text(hero.change != null
-                ? `${up ? '▲' : '▼'} ${fmtDelta(hero.change, hero.currency)}` +
-                  `  ${fmtPct(hero.changePct)}`
-                : '');
             const st = stateIcon[hero.state] ?? stateIcon.CLOSED;
             this._statusLbl.set_text(
                 `${_(st.txt)} · ${hero.exchange || hero.symbol}`);
@@ -322,11 +276,12 @@ export class TickerPanel {
             .format(t.getHours(), t.getMinutes()));
     }
 
-    /* movers-first card: the active list's five biggest gainers (best
-     * on top) then five biggest losers (worst on top). Every row is a
-     * jump-off — a click hands the symbol to extension.js, which
-     * points the app at the watchlist containing it and raises the
-     * window; the hero/chart above stays the extension's own preview */
+    /* movers board under the "Today's Top Movers" title: the active
+     * list's five biggest gainers (best on top) then five biggest
+     * losers (worst on top). Every row is a jump-off — a click hands
+     * the symbol to extension.js, which points the app at the
+     * watchlist containing it and raises the window; the subtle
+     * selected-pill marks whichever symbol the app currently has open */
     _buildRows(state) {
         this._rows.destroy_all_children();
         const qs = state.quotes.filter(q => q.price != null &&

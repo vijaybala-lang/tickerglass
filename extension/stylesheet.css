@@ -52,10 +52,10 @@
 .tg-header { padding: 2px 14px 6px; spacing: 8px; }
 .tg-main { spacing: 2px; }
 
-.tg-wl-btn { border-radius: 99px; padding: 4px 12px; background-color: transparent;
-             border: 1px solid transparent; }
-.tg-wl { font-weight: 700; font-size: 1.0em; }
-.tg-wl-sub { font-size: 0.75em; color: rgba(255, 255, 255, 0.55); }
+/* the movers board's one heading (the watchlist chrome and the hero
+ * price block were removed — the app owns those) */
+.tg-title { font-weight: 800; font-size: 0.95em; letter-spacing: 0.01em;
+            color: rgba(255, 255, 255, 0.92); }
 
 .tg-status { font-size: 0.8em; font-weight: 600; }
 .tg-status-open { color: #46d98b; }
@@ -66,19 +66,6 @@
 .tg-icon-btn:hover { background-color: rgba(255, 255, 255, 0.14); }
 .tg-icon-btn:active { background-color: rgba(255, 255, 255, 0.22); }
 .tg-icon-btn:focus { border-color: rgba(255, 255, 255, 0.25); }
-
-/* ── hero ───────────────────────────────────────────────────────────────── */
-.tg-hero { padding: 2px 14px 4px; spacing: 10px; }
-.tg-hero-sym { font-weight: 700; font-size: 1.15em; }
-.tg-hero-name { font-size: 0.8em; color: rgba(255, 255, 255, 0.6);
-                max-width: 150px; }
-.tg-hero-price { font-size: 2.4em; font-weight: 200; }
-.tg-pill { font-size: 0.85em; font-weight: 700; border-radius: 99px;
-           padding: 2px 10px; }
-.tg-pill-up { background-color: rgba(46, 194, 126, 0.22);
-              color: #46d98b; border: 1px solid rgba(46, 194, 126, 0.4); }
-.tg-pill-down { background-color: rgba(224, 87, 92, 0.20);
-                color: #ff7a80; border: 1px solid rgba(224, 87, 92, 0.4); }
 
 /* ── symbol rows ──────────────────────────────────────────────────────────
  * no horizontal padding: tiles own the full card width (hover pills
