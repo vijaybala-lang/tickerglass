@@ -101,8 +101,6 @@
 .tg-row:hover { background-color: rgba(255, 255, 255, 0.09); }
 .tg-row:active { background-color: rgba(255, 255, 255, 0.16); }
 .tg-row:focus { border-color: rgba(255, 255, 255, 0.25); }
-.tg-row-sel { background-color: rgba(16, 20, 28, 0.45);
-              border-color: rgba(255, 255, 255, 0.18); }
 /* Ported column-for-column from the app's _rebuildSidebar:
  * rowWrap(spacing 8, side margins 10) = leftV | praw —
  * leftV: top[sym | spark 56x22 spacing 8, margins 5/2] + name hugging

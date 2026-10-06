@@ -281,10 +281,11 @@ export class TickerPanel {
 
     /* movers board under the "Today's Top Movers" title: the active
      * list's five biggest gainers (best on top) then five biggest
-     * losers (worst on top). Every row is a jump-off — a click hands
-     * the symbol to extension.js, which points the app at the
-     * watchlist containing it and raises the window; the subtle
-     * selected-pill marks whichever symbol the app currently has open */
+     * losers (worst on top). Every row is a pure jump-off — a click
+     * hands the symbol to extension.js, which points the app at the
+     * watchlist containing it and raises the window. There's no
+     * selected state: the card never mirrors which symbol the app
+     * happens to have open, hover/press alone signal clickability */
     _buildRows(state) {
         this._rows.destroy_all_children();
         const qs = state.quotes.filter(q => q.price != null &&
@@ -308,12 +309,12 @@ export class TickerPanel {
         if (g.length) {
             section(_('▲  Top gainers'), 'tg-sec-up');
             for (const q of g)
-                this._rows.add_child(this._mkRow(q, q.symbol === state.hero));
+                this._rows.add_child(this._mkRow(q));
         }
         if (l.length) {
             section(_('▼  Top losers'), 'tg-sec-down');
             for (const q of l)
-                this._rows.add_child(this._mkRow(q, q.symbol === state.hero));
+                this._rows.add_child(this._mkRow(q));
         }
 
         /* TEMP allocation forensics (journal '[tg]'): St-18 centers/
@@ -341,9 +342,8 @@ export class TickerPanel {
      * under it". The old single-top-row port broke that rhythm (name
      * floated below the price column, spark read short). Clicking the
      * tile opens the symbol in the app. */
-    _mkRow(q, selected) {
-        const btn = new St.Button({style_class: 'tg-row' +
-                                    (selected ? ' tg-row-sel' : ''),
+    _mkRow(q) {
+        const btn = new St.Button({style_class: 'tg-row',
                                    can_focus: true, x_expand: true});
         // All align/expand claims go in the CONSTRUCTOR: post-init
         // assignment measured dead on GNOME 50 (0048194's x_align
