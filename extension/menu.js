@@ -94,9 +94,12 @@ const MiniSpark = GObject.registerClass(
 class MiniSpark extends St.DrawingArea {
     _init(values, up) {
         // same painter as the app sidebar rows (shared paintMiniSpark) —
-        // and now the same 56×22 box, so the curve renders identically
+        // and now the same 56×22 box, so the curve renders identically.
+        // x_expand in the CONSTRUCTOR (the app's hexpand): post-init
+        // expand/align claims are dead in St-18, ctor ones are proven
         super._init({style_class: 'tg-row-spark', width: 56, height: 22,
                      reactive: false, can_focus: false,
+                     x_expand: true,
                      y_align: Clutter.ActorAlign.CENTER});
         this._values = values ?? null;
         this._up = up;
@@ -308,6 +311,22 @@ export class TickerPanel {
             for (const q of l)
                 this._rows.add_child(this._mkRow(q, q.symbol === state.hero));
         }
+
+        /* TEMP allocation forensics (journal '[tg]'): St-18 centers/
+         * clamps children in ways theory can't reach — numbers end
+         * the guessing. Remove once layout is confirmed stable. */
+        const kids = this._rows.get_children();
+        console.log(`[tg] rebuild: ${kids.length} children, ` +
+            `rows pref=${this._rows.get_preferred_width()}`);
+        GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+            const probe = kids.slice(0, 3).map(k =>
+                `${(k.get_style_class() ?? '?').split(' ')[0]}` +
+                `:w=${k.get_width()},pref=${k.get_preferred_width()}` +
+                (k.get_child ? `,child:child.w=${k.get_child().get_width()},` +
+                    `pref=${k.get_child().get_preferred_width()}` : ''));
+            console.log('[tg] alloc: ' + probe.join(' | '));
+            return GLib.SOURCE_REMOVE;
+        });
     }
 
     /* THE app's sidebar tile, ported column-for-column from
@@ -322,17 +341,20 @@ export class TickerPanel {
         const btn = new St.Button({style_class: 'tg-row' +
                                     (selected ? ' tg-row-sel' : ''),
                                    can_focus: true, x_expand: true});
-        const wrap = new St.BoxLayout({style_class: 'tg-row-wrap'});
-        wrap.x_align = Clutter.ActorAlign.FILL;   // St-18 Bin centers
+        // All align/expand claims go in the CONSTRUCTOR: post-init
+        // assignment measured dead on GNOME 50 (0048194's x_align
+        // assigns changed nothing; ctor-set aligns — label()'s START,
+        // Tri's y_center, hero's END — demonstrably work).
+        const wrap = new St.BoxLayout({style_class: 'tg-row-wrap',
+                                       x_align: Clutter.ActorAlign.FILL});
         const leftV = new St.BoxLayout({vertical: true,
-                                        style_class: 'tg-row-left'});
-        leftV.x_align = Clutter.ActorAlign.FILL;
-        leftV.x_expand = true;                    // the app's hexpand
-        const top = new St.BoxLayout({style_class: 'tg-row-top'});
-        top.x_align = Clutter.ActorAlign.FILL;
+                                        style_class: 'tg-row-left',
+                                        x_align: Clutter.ActorAlign.FILL,
+                                        x_expand: true});
+        const top = new St.BoxLayout({style_class: 'tg-row-top',
+                                      x_align: Clutter.ActorAlign.FILL});
         top.add_child(label(q.symbol.replace(/^\^/, ''), 'tg-row-sym'));
         const spark = new MiniSpark(q.spark, (q.change ?? 0) >= 0);
-        spark.x_expand = true;
         top.add_child(spark);
         leftV.add_child(top);
         const nm = (q.name ?? '').replace(/[\u2018\u2019'].*/g, '')

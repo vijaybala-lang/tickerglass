@@ -86,7 +86,11 @@
  * small colored headers above the two row blocks; the rows themselves
  * wear .tg-row and get hover/press feedback — they launch the app */
 .tg-sec-h { font-size: 0.78em; font-weight: 700; letter-spacing: 0.06em;
-            padding: 8px 14px 2px; }
+            padding: 8px 14px 2px;
+            /* St-18 clamped this to a width that ellipsized 'Top
+             * losers'; same min-width lever as the tiles: 302 + the
+             * 28px side padding = the full 330 card */
+            min-width: 302px; }
 .tg-sec-up { color: #46d98b; }
 .tg-sec-down { color: #ff7a80; }
 .tg-nomove { color: rgba(255, 255, 255, 0.45); font-size: 0.85em;
@@ -104,7 +108,11 @@
  * leftV: top[sym | spark 56x22 spacing 8, margins 5/2] + name hugging
  * under the symbol; praw: price + triangle/percent, centered against
  * the whole two-line height (y_align CENTER in menu.js). */
-.tg-row-wrap { spacing: 8px; padding: 0 10px; }
+/* min-width on the wrap is the ONLY measured-working full-width lever
+ * in St-18 (the Bin centers its child at natural size; JS x_align
+ * assigns do nothing). 308 + the 20px side padding = 328 = button
+ * interior inside its 1px border — no popup overflow */
+.tg-row-wrap { spacing: 8px; padding: 0 10px; min-width: 308px; }
 .tg-row-left { spacing: 0; }
 .tg-row-top { spacing: 8px; padding: 5px 0 2px; }
 .tg-row-praw { spacing: 0; }

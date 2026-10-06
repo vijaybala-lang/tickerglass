@@ -29,7 +29,7 @@ otherwise have been discovered at a login screen:
 | parse + full-load | `gjs -m tools/syntax-check.mjs` | SyntaxError, and (phase 2) missing named exports between modules — the `Tri` incident |
 | paint code | headless cairo probes (see `/tmp/opencode/tri-unit.mjs` pattern) | invalid GJS boxed ctors (`new Pango.Layout(ctx)`), double frees, direction/geometry errors, transform leaks |
 | GJS property surface | `strings /usr/lib64/gnome-shell/St-*.typelib \| grep ...` before using an St property | `toggle_style_class_name` (does not exist), `x_fill` (removed in GNOME 50 — passing it in a constructor THROWS and kills render) |
-| layout defaults in St-18 | remember: St.Bin/Button lost x_fill and CENTERS its child at natural width — the child must claim `x_align = FILL` itself (screenshot-proved: full-width button, shrunken centered tile) | row content floating as an island in the card |
+| layout defaults in St-18 | align/expand claims ONLY work in the CONSTRUCTOR (post-init assigns are silently dead — proven by 0048194's x_align doing nothing); St.Bin/Button centers its child at natural width and the ONLY measured lever is CSS `min-width` on the child (content-box: min-width + padding must fit the parent) | row content floating as an island in the card; 'Top losers' header ellipsizing |
 | app-side | relaunch app, grep stderr | anything |
 
 ## Deploy loop
