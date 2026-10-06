@@ -369,9 +369,13 @@ export class TickerPanel {
         const btn = new St.Button({style_class: 'tg-row' +
                                     (selected ? ' tg-row-sel' : ''),
                                    can_focus: true,
-                                   // 100% of the card: the hover pill
-                                   // should span the menu, not hug text
-                                   x_expand: true, x_fill: true});
+                                   // 100% of the card: x_expand + the
+                                   // default FILL align spans the box.
+                                   // NO x_fill — GNOME 50's St dropped
+                                   // the property; passing it throws
+                                   // 'No property x_fill on StButton'
+                                   // and kills render (tiles vanished)
+                                   x_expand: true});
         const tile = col('tg-row-tile');
         const top = row();
         top.add_child(label(q.symbol.replace(/^\^/, ''), 'tg-row-sym'));
