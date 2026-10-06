@@ -202,11 +202,7 @@ export class TickerPanel {
         this._updLbl = new St.Label({text: '', style_class: 'tg-updated'});
         foot.add_child(this._updLbl);
         foot.add_child(spacer());
-        this._addBtn = new St.Button({style_class: 'tg-icon-btn'});
-        this._addBtn.set_child(new St.Icon({icon_name: 'list-add-symbolic',
-                                            icon_size: 16}));
-        this._addBtn.connect('clicked', () => this._openPrefs());
-        foot.add_child(this._addBtn);
+        /* one gear, not a gear + a plus: both opened the same prefs */
         this._gearBtn = new St.Button({style_class: 'tg-icon-btn'});
         this._gearBtn.set_child(new St.Icon({icon_name: 'emblem-system-symbolic',
                                              icon_size: 16}));
