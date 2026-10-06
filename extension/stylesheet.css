@@ -116,6 +116,11 @@
 /* the app tile: top line = symbol | sparkline (fills) | price,
  * pct row = shared triangle asset + percent; name dim underneath */
 .tg-row-tile { spacing: 0; }
+/* hot-path insurance while JS is session-cached: with x_fill gone the
+ * Bin centers the tile, so force its natural width to fill the card
+ * (330 minus the selected-row border) — the x_align fix in menu.js is
+ * the permanent one for the next login */
+.tg-row-tile { min-width: 326px; }
 .tg-row-praw { spacing: 0; }
 .tg-row-pctbox { spacing: 4px; }
 .tg-row-spark { margin-right: 2px; }

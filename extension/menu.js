@@ -377,7 +377,13 @@ export class TickerPanel {
                                    // and kills render (tiles vanished)
                                    x_expand: true});
         const tile = col('tg-row-tile');
+        // St-18's St.Bin (Button's parent) lost x_fill entirely — it
+        // centers its child at natural width unless the CHILD claims
+        // FILL. Without this the tile sits as a shrunken island in
+        // the middle of a full-width button (screenshot-proved).
+        tile.x_align = Clutter.ActorAlign.FILL;
         const top = row();
+        top.x_align = Clutter.ActorAlign.FILL;
         top.add_child(label(q.symbol.replace(/^\^/, ''), 'tg-row-sym'));
         const spark = new MiniSpark(q.spark, (q.change ?? 0) >= 0);
         spark.x_expand = true;      // the app's hexpand: it fills

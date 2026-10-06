@@ -29,6 +29,7 @@ otherwise have been discovered at a login screen:
 | parse + full-load | `gjs -m tools/syntax-check.mjs` | SyntaxError, and (phase 2) missing named exports between modules — the `Tri` incident |
 | paint code | headless cairo probes (see `/tmp/opencode/tri-unit.mjs` pattern) | invalid GJS boxed ctors (`new Pango.Layout(ctx)`), double frees, direction/geometry errors, transform leaks |
 | GJS property surface | `strings /usr/lib64/gnome-shell/St-*.typelib \| grep ...` before using an St property | `toggle_style_class_name` (does not exist), `x_fill` (removed in GNOME 50 — passing it in a constructor THROWS and kills render) |
+| layout defaults in St-18 | remember: St.Bin/Button lost x_fill and CENTERS its child at natural width — the child must claim `x_align = FILL` itself (screenshot-proved: full-width button, shrunken centered tile) | row content floating as an island in the card |
 | app-side | relaunch app, grep stderr | anything |
 
 ## Deploy loop
@@ -55,6 +56,11 @@ journalctl --user -b -o short-iso | grep -i tickerglass | grep -vi weatherglass
   Wayland side); verify panel widgets via journal + user eyes.
 - A render-path throw repeats per fetch/open — the journal shows the
   stack trace with the exact menu.js line; trust it over theory.
+- CSS-only changes MAY reach the session without logout: poke the
+  theme context (`gsettings set org.gnome.desktop.interface
+  gtk-theme Adwaita` and set it back) — the shell reloads registered
+  stylesheets. Worth trying before spending a login; the JS half is
+  still cached no matter what.
 
 ## Known upstream doc gap
 
