@@ -1,7 +1,7 @@
 {
   "uuid": "tickerglass@vijaybala.dev",
   "name": "TickerGlass",
-  "description": "A little window onto the market: the panel counts how many of your watchlist symbols are up and down, and the menu lists the top 5 gainers and losers — click any ticker to open it in the app. Portfolio card with animated charts — powered by Yahoo Finance, no API key, paired with the TickerGlass app.",
+  "description": "A little window onto the market: the panel counts how many of your watchlist symbols are up and down, and the menu lists the top 5 gainers and losers — click any ticker to open it in the app. Powered by Yahoo Finance, no API key, paired with the TickerGlass app.",
   "shell-version": ["50"],
   "settings-schema": "org.gnome.shell.extensions.tickerglass",
   "url": "https://vijaybala.dev",
