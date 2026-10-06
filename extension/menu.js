@@ -126,12 +126,15 @@ const stateIcon = {
 };
 
 export class TickerPanel {
-    constructor({dark, onRefresh}) {
+    constructor({dark, onRefresh, twoCol}) {
         this._dark = dark;
         this._onRefresh = onRefresh;
+        this._twoCol = twoCol !== false;            // default: board wide
         this._clockId = 0;
         this.actor = new St.BoxLayout({style_class: 'tg-content',
                                        vertical: true});
+        if (this._twoCol)
+            this.actor.add_style_class_name('tg-2col');
 
         this._placeholder = this._buildPlaceholder();
         this._main = this._buildMain();
@@ -304,17 +307,44 @@ export class TickerPanel {
         const section = (text, cls) => {
             const lbl = label(text, 'tg-sec-h');
             lbl.add_style_class_name(cls);
-            this._rows.add_child(lbl);
+            return lbl;
         };
-        if (g.length) {
-            section(_('▲  Top gainers'), 'tg-sec-up');
-            for (const q of g)
-                this._rows.add_child(this._mkRow(q));
-        }
-        if (l.length) {
-            section(_('▼  Top losers'), 'tg-sec-down');
-            for (const q of l)
-                this._rows.add_child(this._mkRow(q));
+        /* two-column board (default): gainers left, losers right — the
+         * scoreboard read, half the vertical stretch. When one side is
+         * empty the card narrows itself back to stacked rows: a column
+         * of nothing wastes half a 500px card */
+        const moverCol = (qs, up) => {
+            const c = new St.BoxLayout({vertical: true,
+                                        style_class: 'tg-col',
+                                        x_align: Clutter.ActorAlign.FILL,
+                                        x_expand: true});
+            c.add_child(section(up ? _('▲  Top gainers')
+                                   : _('▼  Top losers'),
+                                up ? 'tg-sec-up' : 'tg-sec-down'));
+            for (const q of qs)
+                c.add_child(this._mkRow(q));
+            return c;
+        };
+        if (this._twoCol && g.length && l.length) {
+            const cols = new St.BoxLayout({style_class: 'tg-cols',
+                                           x_align: Clutter.ActorAlign.FILL,
+                                           x_expand: true});
+            cols.add_child(moverCol(g, true));
+            cols.add_child(moverCol(l, false));
+            this._rows.add_child(cols);
+        } else {
+            if (g.length) {
+                this._rows.add_child(section(_('▲  Top gainers'),
+                                             'tg-sec-up'));
+                for (const q of g)
+                    this._rows.add_child(this._mkRow(q));
+            }
+            if (l.length) {
+                this._rows.add_child(section(_('▼  Top losers'),
+                                             'tg-sec-down'));
+                for (const q of l)
+                    this._rows.add_child(this._mkRow(q));
+            }
         }
 
         /* TEMP allocation forensics (journal '[tg]'): St-18 centers/
@@ -390,6 +420,17 @@ export class TickerPanel {
 
     setDark(dark) {
         this._dark = dark;
+    }
+
+    /* prefs flip it live; the caller re-renders right after */
+    setTwoCol(on) {
+        if (this._twoCol === on)
+            return;
+        this._twoCol = on;
+        if (on)
+            this.actor.add_style_class_name('tg-2col');
+        else
+            this.actor.remove_style_class_name('tg-2col');
     }
 
     destroy() {

@@ -101,6 +101,11 @@
       </choices>
       <summary>Window the panel sparkline shows</summary>
     </key>
+    <key name="menu-two-column" type="b">
+      <default>true</default>
+      <summary>Two-column movers menu</summary>
+      <description>Top gainers and top losers side by side in the dropdown (wide card); false stacks them vertically in a narrow card</description>
+    </key>
 
     <!-- ── chart defaults (shared: card + app) ─────────────────────────── -->
     <key name="chart-range" type="s">

@@ -71,6 +71,17 @@
  * no horizontal padding: tiles own the full card width (hover pills
  * included); the text inset lives inside .tg-row-wrap */
 .tg-rows { padding: 4px 0 2px; spacing: 1px; }
+
+/* ── two-column movers board (default; prefs switch stacks it) ────────
+ * wide card, gainers left / losers right. Geometry: (500 - 8 gap)/2 =
+ * 246 per column; tiles and headers need column-sized min-widths —
+ * St-18's Bin still centers children at natural width, JS assigns are
+ * dead, CSS min-width is the only lever (see DEVELOPMENT.md) */
+.tg-content.tg-2col { width: 500px; }
+.tg-cols { spacing: 8px; }
+.tg-col { spacing: 0; }
+.tg-2col .tg-row-wrap { min-width: 222px; }
+.tg-2col .tg-sec-h { min-width: 214px; }
 /* ── open-app button ────────────────────────────────────────────────────
  * the card is a glance; the window is the destination */
 .tg-open-app { margin: 6px 10px 0; border-radius: 99px;

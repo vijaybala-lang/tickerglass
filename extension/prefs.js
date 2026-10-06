@@ -211,6 +211,14 @@ export default class TickerGlassPrefs extends ExtensionPreferences {
         page.add(g);
 
         const g2 = new Adw.PreferencesGroup({title: _('Dropdown rows')});
+        const colRow = new Adw.SwitchRow({
+            title: _('Two-column movers'),
+            subtitle: _('Gainers and losers side by side; off stacks ' +
+                        'them in one column'),
+        });
+        settings.bind('menu-two-column', colRow, 'active',
+                      Gio.SettingsBindFlags.DEFAULT);
+        g2.add(colRow);
         const sparkIds = ['1d', '5d'];
         const sparkRow = new Adw.ComboRow({
             title: _('Sparkline window'),

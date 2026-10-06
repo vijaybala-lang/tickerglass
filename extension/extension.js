@@ -85,6 +85,7 @@ class TickerIndicator extends PanelMenu.Button {
         this._panel = new TickerPanel({
             dark: this._dark,
             onRefresh: () => this._fetch(true),
+            twoCol: this._settings.get_boolean('menu-two-column'),
         });
         const section = new PopupMenu.PopupMenuSection();
         section.actor.add_child(this._panel.actor);
@@ -310,6 +311,10 @@ class TickerIndicator extends PanelMenu.Button {
             break;
         case 'panel-spark-range':
             this._fetch(true);       // the dropdown rows' sparks change
+            break;
+        case 'menu-two-column':
+            this._panel.setTwoCol(this._settings.get_boolean('menu-two-column'));
+            this._panel.render(this._state());
             break;
         case 'refresh-seconds':
             this._restartTimer();
