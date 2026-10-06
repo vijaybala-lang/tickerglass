@@ -135,6 +135,8 @@ export class TickerPanel {
                                        vertical: true});
         if (this._twoCol)
             this.actor.add_style_class_name('tg-2col');
+        if (!this._dark)
+            this.actor.add_style_class_name('tg-light-ink');
 
         this._placeholder = this._buildPlaceholder();
         this._main = this._buildMain();
@@ -418,8 +420,18 @@ export class TickerPanel {
         return btn;
     }
 
+    /* adaptive ink (the WeatherGlass pattern, now truly wired): the
+     * card hand-paints its own inks in CSS, so it must be told which
+     * world the desktop lives in — whites for the dark popup, deep
+     * ink for a light one. Cairo greens/reds read on both, untouched */
     setDark(dark) {
+        if (this._dark === dark)
+            return;
         this._dark = dark;
+        if (dark)
+            this.actor.remove_style_class_name('tg-light-ink');
+        else
+            this.actor.add_style_class_name('tg-light-ink');
     }
 
     /* prefs flip it live; the caller re-renders right after */

@@ -61,6 +61,8 @@ class TickerIndicator extends PanelMenu.Button {
         // shows, zero extra network
         this._box = new St.BoxLayout({style_class: 'tg-panel-box',
                                       y_align: Clutter.ActorAlign.CENTER});
+        if (!this._dark)
+            this._box.add_style_class_name('tg-light-bar');
         this._gTri = new Tri(true);
         this._lTri = new Tri(false);
         this._gTri.setDim(true);
@@ -117,6 +119,14 @@ class TickerIndicator extends PanelMenu.Button {
         });
         this._settingsId = this._settings.connect('changed',
             (s, key) => this._onSetting(key));
+
+        // WeatherGlass law: ink follows the desktop's light/dark world
+        // live — a theme flip mid-session repaints the card and the
+        // bar scoreboard, no logout required
+        this._ifaceSettings = new Gio.Settings(
+            {schema_id: 'org.gnome.desktop.interface'});
+        this._ifaceId = this._ifaceSettings.connect('changed',
+            () => this._onIfaceChange());
 
         this._fetch(true);
         this._restartTimer();
@@ -324,6 +334,20 @@ class TickerIndicator extends PanelMenu.Button {
         }
     }
 
+    /* ink follows the desktop world (WeatherGlass law): card AND the
+     * bar scoreboard flip together when the world flips */
+    _onIfaceChange() {
+        const dark = _interfaceIsDark();
+        if (dark === this._dark)
+            return;
+        this._dark = dark;
+        this._panel.setDark(dark);
+        if (dark)
+            this._box.remove_style_class_name('tg-light-bar');
+        else
+            this._box.add_style_class_name('tg-light-bar');
+    }
+
     destroy() {
         this._dead = true;
         for (const id of [this._timer, this._retryTimer])
@@ -331,6 +355,8 @@ class TickerIndicator extends PanelMenu.Button {
                 GLib.source_remove(id);
         if (this._settingsId)
             this._settings.disconnect(this._settingsId);
+        if (this._ifaceId)
+            this._ifaceSettings.disconnect(this._ifaceId);
         if (this._openId)
             this.menu.disconnect(this._openId);
         this._panel?.destroy();      // plain JS: actor teardown misses its timers

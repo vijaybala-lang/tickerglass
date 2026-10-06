@@ -103,8 +103,8 @@
 .tg-sec-h { font-size: 0.78em; font-weight: 700; letter-spacing: 0.06em;
             padding: 8px 14px 2px;
             /* St-18 clamped this to a width that ellipsized 'Top
-             * losers'; same min-width lever as the tiles: 302 + the
-             * 28px side padding = the full 330 card */
+             * losers'; same min-width lever as the tiles: 292 + the
+             * 28px side padding = the gutted content width (330-8) */
             min-width: 292px; }
 .tg-sec-up { color: #46d98b; }
 .tg-sec-down { color: #ff7a80; }
@@ -123,8 +123,8 @@
  * the whole two-line height (y_align CENTER in menu.js). */
 /* min-width on the wrap is the ONLY measured-working full-width lever
  * in St-18 (the Bin centers its child at natural size; JS x_align
- * assigns do nothing). 308 + the 20px side padding = 328 = button
- * interior inside its 1px border — no popup overflow */
+ * assigns do nothing). 300 + the 20px side padding = 320 = button
+ * interior inside the gutted card (330 - 8 gut - 2 border) */
 .tg-row-wrap { spacing: 8px; padding: 0 10px; min-width: 300px; }
 .tg-row-left { spacing: 0; }
 .tg-row-top { spacing: 8px; padding: 5px 0 2px; }
@@ -146,5 +146,44 @@
 .tg-foot { padding: 4px 14px 0; spacing: 6px; }
 .tg-updated { font-size: 0.75em; color: rgba(255, 255, 255, 0.45); }
 
-/* ── light shell theme (Yaru-light & friends) ───────────────────────────── */
+/* ── adaptive ink (the app's & weatherglass's mechanism, wired) ────────
+ * .tg-light-ink rides the card actor, .tg-light-bar the panel box —
+ * both flipped live by extension.js when the interface schema says
+ * the desktop went light. Everything BELOW is hand-painted white in
+ * the rules above, so each needs a deep-ink twin; theme-inherited
+ * text (symbol, price, open-app label) needs nothing. Cairo INK_*
+ * greens/reds read on both worlds and stay. Light accents deepen to
+ * keep contrast against a pale popup. */
 .tg-content.tg-light-ink .tg-placeholder-text { color: rgba(16, 24, 35, 0.6); }
+.tg-content.tg-light-ink .tg-title   { color: rgba(16, 24, 35, 0.92); }
+.tg-content.tg-light-ink .tg-nomove  { color: rgba(16, 24, 35, 0.55); }
+.tg-content.tg-light-ink .tg-row-name { color: rgba(16, 24, 35, 0.6); }
+.tg-content.tg-light-ink .tg-updated { color: rgba(16, 24, 35, 0.5); }
+.tg-content.tg-light-ink .tg-status-shut { color: rgba(16, 24, 35, 0.55); }
+
+.tg-content.tg-light-ink .tg-row:hover  { background-color: rgba(16, 24, 35, 0.07); }
+.tg-content.tg-light-ink .tg-row:active { background-color: rgba(16, 24, 35, 0.13); }
+.tg-content.tg-light-ink .tg-row:focus  { border-color: rgba(16, 24, 35, 0.28); }
+.tg-content.tg-light-ink .tg-icon-btn:hover  { background-color: rgba(16, 24, 35, 0.1); }
+.tg-content.tg-light-ink .tg-icon-btn:active { background-color: rgba(16, 24, 35, 0.16); }
+.tg-content.tg-light-ink .tg-icon-btn:focus  { border-color: rgba(16, 24, 35, 0.28); }
+.tg-content.tg-light-ink .tg-open-app { background-color: rgba(16, 24, 35, 0.06);
+    border-color: rgba(16, 24, 35, 0.14); }
+.tg-content.tg-light-ink .tg-open-app:hover  { background-color: rgba(16, 24, 35, 0.11); }
+.tg-content.tg-light-ink .tg-open-app:active { background-color: rgba(16, 24, 35, 0.17); }
+.tg-content.tg-light-ink .tg-open-app:focus  { border-color: rgba(16, 24, 35, 0.28); }
+
+/* accents: the neon pairs wash out on pale glass — deepen */
+.tg-content.tg-light-ink .tg-status-open,
+.tg-content.tg-light-ink .tg-sec-up,
+.tg-content.tg-light-ink .tg-rows .tg-up,
+.tg-content.tg-light-ink .tg-rows .tg-up .tg-row-pct { color: #0f9d58; }
+.tg-content.tg-light-ink .tg-sec-down,
+.tg-content.tg-light-ink .tg-rows .tg-down,
+.tg-content.tg-light-ink .tg-rows .tg-down .tg-row-pct { color: #d64550; }
+
+/* the same mechanism on the bar side: the scoreboard's whites */
+.tg-panel-box.tg-light-bar .tg-gcnt { color: #0f9d58; }
+.tg-panel-box.tg-light-bar .tg-lcnt { color: #d64550; }
+.tg-panel-box.tg-light-bar .tg-sep  { color: rgba(0, 0, 0, 0.35); }
+.tg-panel-box.tg-light-bar .tg-dim  { color: rgba(0, 0, 0, 0.42); }
