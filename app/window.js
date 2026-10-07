@@ -47,7 +47,7 @@ const BUS_PATH = '/dev/vijaybala/TickerGlass/Data';
 /* width (px) of the swipe-revealed delete button */
 const TG_DEL_W = 44;
 import {parseWatchlists, stringifyWatchlists, fmtPrice, fmtDelta, fmtPct,
-        fmtCompact, fmtTime, axisDate, symbolShort, RANGE_LABEL,
+        fmtCompact, fmtTime, axisDate, symbolShort, RANGES, RANGE_LABEL,
         INTERVALS, INTERVAL_LABEL, intervalFor} from './fmt.js';
 
 /* ── news source icons: fetch /favicon.ico once per host (Soup lives in
@@ -722,15 +722,25 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._chart.add_controller(hover);
         chartPage.append(this._chart);
 
-        // controls row: interval + style. (The range-chip row is gone:
-        // the board is a 52-week chart — the chips were decoration
-        // nobody pressed. Range still rides the chart-range key +
-        // win.range action, so a one-line gsettings set retunes it:
-        //   gsettings set … chart-range '"1mo"')
+        // controls row: range chips + interval + style. The 52W chip
+        // is retired per user request (1Y covers the same window);
+        // the rest of the selector stays
         const controls = new Gtk.Box({orientation: Gtk.Orientation.HORIZONTAL,
                                       margin_top: 4, margin_bottom: 4,
                                       margin_start: 18, margin_end: 18,
                                       spacing: 8});
+        this._rangeChips = {};
+        const chipBox = new Adw.WrapBox({line_spacing: 4, child_spacing: 4});
+        for (const r of RANGES.filter(r => r !== '52w')) {
+            const b = new Gtk.Button({label: RANGE_LABEL[r],
+                                      css_classes: ['tg-chip']});
+            b.set_action_name('win.range');
+            b.set_action_target_value(new GLib.Variant('s', r));
+            b.set_tooltip_text(`Range ${r}`);
+            chipBox.append(b);
+            this._rangeChips[r] = b;
+        }
+        controls.append(chipBox);
         const ctlSpacer = new Gtk.Box();
         ctlSpacer.set_hexpand(true);
         controls.append(ctlSpacer);
@@ -4219,6 +4229,10 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._newsFor = sym;
             this._loadNews(sym);
             this._loadStats(sym);
+        }
+        for (const [r, b] of Object.entries(this._rangeChips)) {
+            b.set_css_classes(r === this._settings.get_string('chart-range')
+                ? ['tg-chip', 'tg-chip-active'] : ['tg-chip']);
         }
         this._syncStyleBtn();
         this._ivBtn.set_label(

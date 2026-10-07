@@ -109,7 +109,7 @@
 
     <!-- ── chart defaults (shared: card + app) ─────────────────────────── -->
     <key name="chart-range" type="s">
-      <default>'52w'</default>
+      <default>'1y'</default>
       <summary>Chart range</summary>
       <description>1d 7d 1mo 52w ytd 1y 2y 5y</description>
     </key>
