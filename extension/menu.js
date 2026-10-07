@@ -119,7 +119,7 @@ class MiniSpark extends St.DrawingArea {
 });
 
 const stateIcon = {
-    REGULAR: {txt: N_('Open'), on: true},
+    REGULAR: {txt: N_('Market open'), on: true},
     PRE: {txt: N_('Pre-market'), on: true},
     POST: {txt: N_('After-hours'), on: true},
     CLOSED: {txt: N_('Closed'), on: false},
@@ -131,6 +131,12 @@ export class TickerPanel {
         this._onRefresh = onRefresh;
         this._twoCol = twoCol !== false;            // default: board wide
         this._clockId = 0;
+        this._spinId = 0;
+        this._spin = 0;
+        // extension.js sets this to close its popup before prefs open:
+        // a live PopupMenu holds Clutter's input grab and the prefs
+        // window can't surface over it (classic openPrefs-from-menu bug)
+        this.onCloseMenu = null;
         this.actor = new St.BoxLayout({style_class: 'tg-content',
                                        vertical: true});
         if (this._twoCol)
@@ -173,7 +179,8 @@ export class TickerPanel {
         head.style_class = 'tg-header';
         head.add_child(label(_("Today's Top Movers"), 'tg-title'));
         head.add_child(spacer());
-        this._statusLbl = new St.Label({text: '', style_class: 'tg-status'});
+        this._statusLbl = new St.Label({text: '',
+                                        style_class: 'tg-status-badge'});
         head.add_child(this._statusLbl);
         /* settings rides the header next to refresh — the footer is
          * just the clock now; the two utility buttons live together */
@@ -188,7 +195,10 @@ export class TickerPanel {
         this._refreshIcon = new St.Icon({icon_name: 'view-refresh-symbolic',
                                          icon_size: 16});
         this._refreshBtn.set_child(this._refreshIcon);
-        this._refreshBtn.connect('clicked', () => this._onRefresh?.());
+        this._refreshBtn.connect('clicked', () => {
+            this._spinRefresh();        // immediate proof the click landed
+            this._onRefresh?.();
+        });
         head.add_child(this._refreshBtn);
         m.add_child(head);
 
@@ -224,12 +234,37 @@ export class TickerPanel {
     }
 
     _openPrefs() {
-        try {
-            Main.extensionManager.lookup('tickerglass@vijaybala.dev')
-                .openPreferences();
-        } catch (e) {
-            logError(e, 'TickerGlass');
-        }
+        // close the popup first: its Clutter grab would otherwise keep
+        // the prefs window from ever surfacing; open on the beat after
+        // the close so the grab has actually released
+        this.onCloseMenu?.();
+        GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+            try {
+                Main.extensionManager.lookup('tickerglass@vijaybala.dev')
+                    .openPreferences();
+            } catch (e) {
+                logError(e, 'TickerGlass');
+            }
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    /* one 360° flick of the refresh icon — feedback that the press
+     * registered, independent of how the fetch itself turns out */
+    _spinRefresh() {
+        if (this._spinId)
+            return;
+        this._spin = 0;
+        this._spinId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 40, () => {
+            this._spin = (this._spin + 45) % 360;
+            this._refreshIcon.rotation_angle_z = this._spin;
+            const done = this._spin === 0;
+            if (done) {
+                this._refreshIcon.rotation_angle_z = 0;
+                this._spinId = 0;
+            }
+            return done ? GLib.SOURCE_REMOVE : GLib.SOURCE_CONTINUE;
+        });
     }
 
     /* public API driven by extension.js */
@@ -261,15 +296,24 @@ export class TickerPanel {
         const hero = state.quotes.find(q => q.symbol === state.hero)
                   ?? state.quotes[0];
         if (hero) {
-            const st = stateIcon[hero.state] ?? stateIcon.CLOSED;
+            // the badge describes the BOARD's market, not one symbol's
+            // exchange: a 24/7 crypto or an overseas listing would keep
+            // it glowing "open" long after NYSE shut. Take the dominant
+            // session state across the watchlist's quotes.
+            const tally = {};
+            for (const q of state.quotes)
+                tally[q.state] = (tally[q.state] || 0) + 1;
+            const dom = Object.entries(tally)
+                .sort((a, b) => b[1] - a[1])[0][0];
+            const st = stateIcon[dom] ?? stateIcon.CLOSED;
             // just the market state — the bigger title and the gear
             // moved into this row, and '· NYSE' never informed a
             // decision on a movers board
             this._statusLbl.set_text(_(st.txt));
-            this._statusLbl.remove_style_class_name('tg-status-open');
-            this._statusLbl.remove_style_class_name('tg-status-shut');
-            this._statusLbl.add_style_class_name(st.on ? 'tg-status-open'
-                                                       : 'tg-status-shut');
+            this._statusLbl.remove_style_class_name('tg-badge-open');
+            this._statusLbl.remove_style_class_name('tg-badge-shut');
+            this._statusLbl.add_style_class_name(st.on ? 'tg-badge-open'
+                                                       : 'tg-badge-shut');
         }
 
         this._buildRows(state);
@@ -437,8 +481,9 @@ export class TickerPanel {
     }
 
     destroy() {
-        if (this._clockId)
-            GLib.source_remove(this._clockId);
+        for (const id of [this._clockId, this._spinId])
+            if (id)
+                GLib.source_remove(id);
         this.actor.destroy();
     }
 }

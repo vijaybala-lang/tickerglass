@@ -97,6 +97,9 @@ class TickerIndicator extends PanelMenu.Button {
         // the footer button is the same launch without the re-point
         this._panel.onOpenSym = sym => this._openInApp(sym);
         this._panel.onOpenApp = () => this._launchApp();
+        // prefs must open AFTER the popup releases its grab (menu.js
+        // calls this before lookup().openPreferences) — close now
+        this._panel.onCloseMenu = () => this.menu.close(true);
         this.menu.actor.add_style_class_name('tg-menu');
         // zero the popup wrappers' chrome — but start ABOVE the panel
         // actor: .tg-content keeps its own CSS padding (4px side gut)
@@ -292,14 +295,19 @@ class TickerIndicator extends PanelMenu.Button {
             GLib.source_remove(this._timer);
             this._timer = 0;
         }
-        const open = this._quotes.some(q =>
+        // a quote's market is "live" if it's in any trading session.
+        // crypto/FX report REGULAR 24/7, so a mixed board keeps polling
+        // overnight (those prices DO move); a pure-equity board goes
+        // CLOSED at 4pm and throttles hard — the point of this method
+        const live = this._quotes.some(q =>
             q.state === 'REGULAR' || q.state === 'PRE' || q.state === 'POST');
         let secs = this._settings.get_int('refresh-seconds');
-        // menu open → 15 s floor; everything closed → 10 min floor
         if (this.menu.isOpen)
-            secs = Math.min(secs, 15);
-        else if (this._quotes.length && !open)
-            secs = Math.max(secs, 600);
+            secs = Math.min(secs, 15);          // actively reading
+        else if (this._quotes.length && !live)
+            secs = Math.max(secs, 1800);        // closed: check back rarely
+        // else: session (incl. after-hours, which we display) → user interval
+        // opening the menu always forces a fresh fetch regardless
         this._timer = GLib.timeout_add_seconds(GLib.PRIORITY_LOW, secs, () => {
             this._timer = 0;
             this._fetch(true);
