@@ -406,7 +406,7 @@ export class YahooClient {
             symbol, range, interval: iv,
             meta: {
                 price: m.regularMarketPrice ?? points.at(-1)?.c ?? null,
-                prevClose: m.chartPreviousClose ?? m.previousClose ?? null,
+                prevClose: m.previousClose ?? m.chartPreviousClose ?? null,
                 currency: m.currency ?? 'USD',
                 exchange: m.fullExchangeName ?? m.exchangeName ?? '',
                 state: m.marketState ?? 'REGULAR',
@@ -635,14 +635,15 @@ export class YahooClient {
         const quotes = data?.finance?.result?.[0]?.quotes ?? [];
         return quotes
             // formatted=false payloads speak regularMarketPrice/pct; the
-            // formatted variants send lastPrice/pctChange — take whichever
+            // formatted variants send lastPrice/pctChange — take whichever,
+            // regular first: lastPrice can carry an extended-hours print
             .filter(q => q?.symbol && Number.isFinite(
-                q.lastPrice ?? q.regularMarketPrice))
+                q.regularMarketPrice ?? q.lastPrice))
             .map(q => ({
                 symbol: q.symbol,
                 name: q.shortname ?? q.shortName ?? q.longName
                     ?? q.longname ?? q.symbol,
-                price: q.lastPrice ?? q.regularMarketPrice,
+                price: q.regularMarketPrice ?? q.lastPrice,
                 changePct: Number.isFinite(q.pctChange)
                     ? q.pctChange / 100
                     : Number.isFinite(q.regularMarketChangePercent)
@@ -656,8 +657,8 @@ export class YahooClient {
     }
 }
 
-/* meta (v8/v7 spark) → our canonical Quote. Extended-hours prices ride
- * through when that's the live session. */
+/* meta (v8/v7 spark) → our canonical Quote. Headlines are the regular
+ * session; extended-hour prints ride as secondary fields. */
 /* ── tiny RSS readers ────────────────────────────────────────────────────
  * The top-news feed is flat, machine-generated XML (one <item> per line);
  * pulling in a real XML parser for four tags would be the heavier option.
@@ -724,21 +725,32 @@ function parseRssItems(xml) {
 
 function normalizeQuote(symbol, m, spark) {
     const state = m.marketState ?? 'REGULAR';
-    let price = m.regularMarketPrice ?? null;
-    let prev = m.chartPreviousClose ?? m.previousClose ?? null;
-    if (state === 'PRE' && m.preMarketPrice != null) {
-        prev = price ?? prev;
-        price = m.preMarketPrice;
-    } else if (state === 'POST' && m.postMarketPrice != null) {
-        prev = price ?? prev;
-        price = m.postMarketPrice;
-    }
+    // The HEADLINE is the regular session, always: close-vs-prevClose
+    // outside market hours, live-vs-prevClose during it. The old code
+    // swapped the extended-hours print into `price` during PRE/POST,
+    // so an after-hours drift in thin liquidity moved everyone's day
+    // numbers — consumers who don't trade the 6 pm pool read 336.67
+    // vs yesterday's close as "today". The extended prints ride along
+    // as secondary fields (Yahoo's site gives them their own tab).
+    const price = m.regularMarketPrice ?? null;
+    // previousClose is session-based; chartPreviousClose is WINDOW-
+    // based (spark 5d probe: 333.02 = five days back vs the true
+    // yesterday 333.63 — Yahoo's own regular pct only reconciles
+    // against the session one)
+    const prev = m.previousClose ?? m.chartPreviousClose ?? null;
     const change = price != null && prev != null ? price - prev : null;
+    const extPct = p => p != null && price ? (p - price) / price : null;
     return {
         symbol,
         name: m.longName ?? m.shortName ?? m.symbol ?? symbol,
         price, prevClose: prev, change,
         changePct: change != null && prev ? change / prev : null,
+        // extended-hours detail: true against the regular close, for
+        // whoever wants it as a tooltip/secondary line — never headline
+        preMarketPrice: m.preMarketPrice ?? null,
+        preMarketChangePct: extPct(m.preMarketPrice),
+        postMarketPrice: m.postMarketPrice ?? null,
+        postMarketChangePct: extPct(m.postMarketPrice),
         dayHigh: m.regularMarketDayHigh ?? null,
         dayLow: m.regularMarketDayLow ?? null,
         open: m.regularMarketOpen ?? null,
