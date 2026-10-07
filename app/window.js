@@ -4163,10 +4163,24 @@ class TickerWindow extends Adw.ApplicationWindow {
                 ],
             };
         } : null;
+        // gray-band frame for the intraday view; the slots only count
+        // when they belong to the day being drawn — overnight, Yahoo's
+        // currentTradingPeriod rolls to TOMORROW's session and tomorrow's
+        // bands must not frame today's closes
+        const eStart = hist.meta.extStart, eEnd = hist.meta.extEnd,
+              rStart = hist.meta.sessionStart, rEnd = hist.meta.sessionEnd;
+        const extHours = hist.range === '1d' &&
+                [eStart, eEnd, rStart, rEnd].every(t => t != null) &&
+                pts.length && rEnd >= pts[0].t &&
+                eStart <= pts.at(-1).t + 6 * 3600
+            ? {preStart: eStart, regStart: rStart,
+               regEnd: rEnd, postEnd: eEnd}
+            : null;
         paintChart(cr, {
             w, h,
             points: pts,
             mode,
+            extHours,
             prevClose: hist.range === '1d' ? hist.meta.prevClose : null,
             dark: this._styleManager?.get_dark() ?? true,
             fmtY: v => fmtPrice(v, hist.meta.currency),
@@ -4337,6 +4351,21 @@ class TickerWindow extends Adw.ApplicationWindow {
             : null;
         renderChips(this._chips, [
             stateTxt && [stateTxt, undefined],
+            // the extended-hours print as a SECONDARY chip during its
+            // session (headline stays regular-close-vs-prevClose —
+            // 6 pm pool moves must not move the board's day numbers)
+            q.state === 'POST' && q.postMarketPrice != null &&
+                ['After hours', fmtPrice(q.postMarketPrice, q.currency) +
+                    (q.postMarketChangePct != null
+                        ? ` ${q.postMarketChangePct >= 0 ? '+' : '−'}${
+                            fmtPct(Math.abs(q.postMarketChangePct))}`
+                        : '')],
+            q.state === 'PRE' && q.preMarketPrice != null &&
+                ['Pre-market', fmtPrice(q.preMarketPrice, q.currency) +
+                    (q.preMarketChangePct != null
+                        ? ` ${q.preMarketChangePct >= 0 ? '+' : '−'}${
+                            fmtPct(Math.abs(q.preMarketChangePct))}`
+                        : '')],
             q.exchange && [q.exchange, undefined,
                            m.tz ? `Exchange timezone: ${m.tz}` : null],
             gap != null && Math.abs(gap) >= 0.0005

@@ -67,6 +67,20 @@ sheet('chart-1d.png', CHW, CHH, cr =>
         fmtY: v => fmtPrice(v), fmtX: t => fmtTime(t, 'America/New_York'),
     }));
 
+// the ext-hours frame: mock session ± the standard 5.5 h pre / 4 h post
+{
+    const p = histDay.points;
+    const ext = {preStart: p[0].t - 5.5 * 3600, regStart: p[0].t,
+                 regEnd: p.at(-1).t, postEnd: p.at(-1).t + 4 * 3600};
+    sheet('chart-day-ext.png', CHW, CHH, cr =>
+        paintChart(cr, {
+            w: CHW, h: CHH, points: p, mode: 'area',
+            prevClose: histDay.meta.prevClose, dark: true, extHours: ext,
+            fmtY: v => fmtPrice(v),
+            fmtX: t => fmtTime(t, 'America/New_York'),
+        }));
+}
+
 sheet('chart-candles.png', CHW, CHH, cr =>
     paintChart(cr, {
         w: CHW, h: CHH, points: histMon.points.slice(-80), mode: 'candles',

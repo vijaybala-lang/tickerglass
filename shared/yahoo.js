@@ -420,6 +420,9 @@ export class YahooClient {
                 volume: m.regularMarketVolume ?? null,
                 sessionStart: trade?.start ?? null,
                 sessionEnd: trade?.end ?? null,
+                // extended-session slots (intraday gray-zone bands)
+                extStart: m.currentTradingPeriod?.pre?.start ?? null,
+                extEnd: m.currentTradingPeriod?.post?.end ?? null,
             },
             points,
         };

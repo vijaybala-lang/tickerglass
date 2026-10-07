@@ -206,11 +206,25 @@ export function paintChart(cr, opts) {
         progress = 1, cursor = null, accent = null,
         compare = null,           // normalized 2nd series: {points:[{t,c}]}
         cursorFmt = null,         // i => tooltip text (default: price · date)
+        extHours = null,          // {preStart,regStart,regEnd,postEnd}:
+                                  // map x by TIME across the full session
+                                  // day and gray out the extended hours
     } = opts;
 
     const n = points?.length ?? 0;
     if (n < 2)
         return;
+
+    // the ext-hours frame is only honest with real timestamps on every
+    // point and a sane slot order; anything else and we plot as usual
+    const ext = extHours &&
+        [extHours.preStart, extHours.regStart, extHours.regEnd,
+         extHours.postEnd].every(t => Number.isFinite(t)) &&
+        extHours.preStart < extHours.regStart &&
+        extHours.regStart < extHours.regEnd &&
+        extHours.regEnd < extHours.postEnd &&
+        points.every(p => Number.isFinite(p.t))
+        ? extHours : null;
 
     const ink     = dark ? [1, 1, 1] : [0.063, 0.094, 0.137];
     const LABEL   = 8.5;
@@ -245,7 +259,11 @@ export function paintChart(cr, opts) {
     const padY = Math.max((hi - lo) * 0.10, Math.abs(midp) * 1e-6, 1e-9);
     lo -= padY; hi += padY;
 
-    const X = i => GUT_L + i * cw / (n - 1);
+    const tX = ext
+        ? t => GUT_L + (t - ext.preStart) /
+              (ext.postEnd - ext.preStart) * cw
+        : null;
+    const X = i => tX ? tX(points[i].t) : GUT_L + i * cw / (n - 1);
     const Y = v => GUT_T + (hi - v) * ch / (hi - lo);
     const up = prevClose != null ? points.at(-1).c >= prevClose
                                  : points.at(-1).c >= points[0].c;
@@ -266,6 +284,27 @@ export function paintChart(cr, opts) {
                     size: LABEL, anchor: 'end', vcenter: y,
                     rgba: [...ink, dark ? 0.55 : 0.62],
                 });
+        }
+    }
+
+    /* gray out the extended-hours zones (the pre 4:00–9:30 and post
+     * 16:00–20:00 windows): the board speaks for consumers who don't
+     * trade the thin pool, so those hours read as scenery, not data.
+     * Slots are TIME-mapped — the 5.5 h pre-window and the 4 h
+     * post-window claim their real share of the canvas, which is also
+     * what tells the eye today's session was the busy middle part */
+    if (ext) {
+        cr.setSourceRGBA(ink[0], ink[1], ink[2], dark ? 0.055 : 0.045);
+        cr.rectangle(GUT_L, GUT_T, tX(ext.regStart) - GUT_L,
+                     h - GUT_B - GUT_T);
+        cr.fill();
+        cr.rectangle(tX(ext.regEnd), GUT_T,
+                     GUT_L + cw - tX(ext.regEnd), h - GUT_B - GUT_T);
+        cr.fill();
+        cr.setSourceRGBA(ink[0], ink[1], ink[2], dark ? 0.16 : 0.14);
+        for (const t of [ext.regStart, ext.regEnd]) {
+            cr.rectangle(tX(t) - 0.25, GUT_T, 0.5, h - GUT_B - GUT_T);
+            cr.fill();
         }
     }
 
@@ -325,8 +364,13 @@ export function paintChart(cr, opts) {
         const m = cmp.length;
         const drawnC = Math.max(2, Math.ceil(m * Math.min(1, progress)));
         cr.newPath();
-        tracePath(cr, cmp.slice(0, drawnC).map(
-            (p, i) => [GUT_L + i * cw / (m - 1), Y(p.c)]));
+        tracePath(cr, cmp.slice(0, drawnC).map((p, i) => [
+            // under an ext-hours frame the benchmark shares the TIME
+            // axis; its bar-count fallback would silently skew against it
+            tX && Number.isFinite(p.t) ? tX(p.t)
+                                       : GUT_L + i * cw / (m - 1),
+            Y(p.c),
+        ]));
         cr.setSourceRGBA(0.384, 0.627, 0.918, 0.85);   // Adwaita blue-2
         cr.setLineWidth(1.4);
         cr.setLineJoin(Cairo.LineJoin.ROUND);
@@ -334,13 +378,25 @@ export function paintChart(cr, opts) {
         cr.stroke();
     }
 
-    /* time axis: ~5 evenly spread ticks, first/last nudged off the edges */
+    /* time axis: ~5 evenly spread ticks, first/last nudged off the
+     * edges; under an ext-hours frame they spread over the whole day
+     * (data-index ticks would clump every label inside the middle
+     * segment and leave the gray zones blank) */
     if (showX) {
         const ticks = Math.max(3, Math.min(6, Math.floor(cw / 72)));
         for (let k = 0; k < ticks; k++) {
-            const i = Math.round(k * (n - 1) / (ticks - 1));
-            const x = Math.min(Math.max(X(i), GUT_L + 14), GUT_L + cw - 14);
-            drawText(cr, fmtX(points[i].t), x, h - 6, {
+            let t, x;
+            if (ext) {
+                t = ext.preStart + k * (ext.postEnd - ext.preStart) /
+                    (ticks - 1);
+                x = Math.min(Math.max(tX(t), GUT_L + 14),
+                             GUT_L + cw - 14);
+            } else {
+                const i = Math.round(k * (n - 1) / (ticks - 1));
+                t = points[i].t;
+                x = Math.min(Math.max(X(i), GUT_L + 14), GUT_L + cw - 14);
+            }
+            drawText(cr, fmtX(t), x, h - 6, {
                 size: LABEL, rgba: [...ink, dark ? 0.5 : 0.6],
             });
         }
@@ -389,8 +445,23 @@ export function paintChart(cr, opts) {
 
     /* hover crosshair + bubble */
     if (cursor && mode !== 'candles') {
-        const i = Math.max(0, Math.min(n - 1,
-            Math.round((cursor.x - GUT_L) / cw * (n - 1))));
+        // under the ext-hours frame x maps by TIME, so the crosshair
+        // snaps to the point whose timestamp is nearest the hovered one
+        // (the index shortcut would skew every reading)
+        let i;
+        if (ext) {
+            const th = ext.preStart + (cursor.x - GUT_L) / cw *
+                (ext.postEnd - ext.preStart);
+            i = 0;
+            let bestD = Infinity;
+            for (let k = 0; k < n; k++) {
+                const d = Math.abs(points[k].t - th);
+                if (d < bestD) { bestD = d; i = k; }
+            }
+        } else {
+            i = Math.max(0, Math.min(n - 1,
+                Math.round((cursor.x - GUT_L) / cw * (n - 1))));
+        }
         const p = points[i];
         const x = X(i), y = Y(p.c);
         cr.setSourceRGBA(...ink, 0.45);
