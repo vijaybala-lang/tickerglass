@@ -77,6 +77,72 @@ class Tri extends St.DrawingArea {
     }
 });
 
+/* the refresh button's busy spinner — weatherglass's exact drawing kit
+ * (St.DrawingArea + vfunc_repaint, same as Tri above) and frame-loop,
+ * just 8 spokes with a fading tail at 90 ms/frame. Rotation was the
+ * wrong tool here twice over: St-18 has no spinning-icon support, and
+ * Clutter's z-rotation about a pivot is precisely the wobble that was
+ * shipped by mistake. Frames tick only while mapped and spinning. */
+const Spin16 = GObject.registerClass(
+class Spin16 extends St.DrawingArea {
+    _init(dark) {
+        super._init({width: 16, height: 16,
+                     y_align: Clutter.ActorAlign.CENTER,
+                     reactive: false, can_focus: false});
+        this._dark = dark;
+        this._frame = 0;
+        this._id = 0;
+        this.connect('destroy', () => this._stop());
+    }
+
+    spinStart() {
+        if (this._id)
+            return;
+        this._id = GLib.timeout_add(GLib.PRIORITY_LOW, 90, () => {
+            this._frame = (this._frame + 1) % 8;
+            if (this.mapped ?? true)
+                this.queue_repaint();
+            return GLib.SOURCE_CONTINUE;
+        });
+    }
+
+    spinStop() {
+        this._stop();
+    }
+
+    _stop() {
+        if (this._id) {
+            GLib.source_remove(this._id);
+            this._id = 0;
+        }
+    }
+
+    vfunc_repaint() {
+        const [w, h] = this.get_surface_size();
+        if (w <= 0 || h <= 0)
+            return;
+        const cr = this.get_context();
+        cr.setOperator(Cairo.Operator.CLEAR);
+        cr.paint();
+        cr.setOperator(Cairo.Operator.OVER);
+        const ink = this._dark ? [1, 1, 1]
+                               : [16 / 255, 24 / 255, 35 / 255];
+        const c = Math.min(w, h) / 2;
+        cr.setLineWidth(c * 0.34);
+        cr.setLineCap(Cairo.LineCap.ROUND);
+        for (let i = 0; i < 8; i++) {
+            const a = i * Math.PI / 4;
+            // the freshest spoke is full ink; a fading tail trails it
+            const age = (this._frame - i + 8) % 8;
+            cr.setSourceRGBA(ink[0], ink[1], ink[2],
+                             Math.max(0.15, 0.9 - age * 0.1));
+            cr.moveTo(c + Math.cos(a) * c * 0.38, c + Math.sin(a) * c * 0.38);
+            cr.lineTo(c + Math.cos(a) * c * 0.8, c + Math.sin(a) * c * 0.8);
+            cr.stroke();
+        }
+    }
+});
+
 const label = (text, cls) => new St.Label({
     text, style_class: cls, x_align: Clutter.ActorAlign.START,
 });
@@ -131,8 +197,6 @@ export class TickerPanel {
         this._onRefresh = onRefresh;
         this._twoCol = twoCol !== false;            // default: board wide
         this._clockId = 0;
-        this._spinId = 0;
-        this._spin = 0;
         // extension.js sets this to close its popup before prefs open:
         // a live PopupMenu holds Clutter's input grab and the prefs
         // window can't surface over it (classic openPrefs-from-menu bug)
@@ -198,15 +262,16 @@ export class TickerPanel {
                                           can_focus: true});
         this._refreshIcon = new St.Icon({icon_name: 'view-refresh-symbolic',
                                          icon_size: 16});
-        // Clutter rotates around pivot-point, which DEFAULTS to the
-        // actor's top-left corner — the spin looked like a wobble. The
-        // icon is 16px, so the center is (8, 8).
-        this._refreshIcon.set_pivot_point(8, 8);
-        this._refreshBtn.set_child(this._refreshIcon);
-        this._refreshBtn.connect('clicked', () => {
-            this._spinRefresh();        // immediate proof the click landed
-            this._onRefresh?.();
-        });
+        // the spinner stands in for the icon while a round is live;
+        // extension.js drives setBusy() at the fetch's start/end
+        this._spinner = new Spin16(this._dark);
+        this._spinner.visible = false;
+        const spinBox = new St.BoxLayout({reactive: false,
+                                          can_focus: false});
+        spinBox.add_child(this._refreshIcon);
+        spinBox.add_child(this._spinner);
+        this._refreshBtn.set_child(spinBox);
+        this._refreshBtn.connect('clicked', () => this._onRefresh?.());
         head.add_child(this._refreshBtn);
         m.add_child(head);
 
@@ -257,22 +322,16 @@ export class TickerPanel {
         });
     }
 
-    /* one 360° flick of the refresh icon — feedback that the press
-     * registered, independent of how the fetch itself turns out */
-    _spinRefresh() {
-        if (this._spinId)
-            return;
-        this._spin = 0;
-        this._spinId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 40, () => {
-            this._spin = (this._spin + 45) % 360;
-            this._refreshIcon.rotation_angle_z = this._spin;
-            const done = this._spin === 0;
-            if (done) {
-                this._refreshIcon.rotation_angle_z = 0;
-                this._spinId = 0;
-            }
-            return done ? GLib.SOURCE_REMOVE : GLib.SOURCE_CONTINUE;
-        });
+    /* a fetch round is in flight: the refresh glyph stands down and
+     * the spinner takes its seat — driven by extension.js, so it also
+     * proves the click landed without any rotation acrobatics */
+    setBusy(on) {
+        this._refreshIcon.visible = !on;
+        this._spinner.visible = on;
+        if (on)
+            this._spinner.spinStart();
+        else
+            this._spinner.spinStop();
     }
 
     /* public API driven by extension.js */
@@ -492,6 +551,12 @@ export class TickerPanel {
             this.actor.remove_style_class_name('tg-light-ink');
         else
             this.actor.add_style_class_name('tg-light-ink');
+        // the spinner paints its own ink (cairo, not CSS) — it has to
+        // hear about the flip directly
+        if (this._spinner) {
+            this._spinner._dark = dark;
+            this._spinner.queue_repaint();
+        }
     }
 
     /* prefs flip it live; the caller re-renders right after */
@@ -506,9 +571,8 @@ export class TickerPanel {
     }
 
     destroy() {
-        for (const id of [this._clockId, this._spinId])
-            if (id)
-                GLib.source_remove(id);
+        if (this._clockId)
+            GLib.source_remove(this._clockId);
         this.actor.destroy();
     }
 }

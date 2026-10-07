@@ -35,6 +35,14 @@ import {MarketClient} from './yahoo.js';
 import {paintChart, paintMiniSpark, paintTri} from './spark.js';
 import {textPrompt} from './prompt.js';
 import {DataFetcher} from './fetch.js';
+import {loadSnapshot, saveSnapshot, makeSnapshot} from './cache.js';
+
+/* the extension's data service (extension/extension.js owns this bus
+ * name); the app is only a guest — absent provider means the app works
+ * exactly as before, self-polling, with the disk snapshot as a warm
+ * boot either way */
+const BUS_NAME = 'dev.vijaybala.TickerGlass.Data';
+const BUS_PATH = '/dev/vijaybala/TickerGlass/Data';
 
 /* width (px) of the swipe-revealed delete button */
 const TG_DEL_W = 44;
@@ -288,6 +296,12 @@ class TickerWindow extends Adw.ApplicationWindow {
 
         this._rebuildTable();
         this._rebuildSidebar();
+        // shared-feed boot: paint the last on-disk round instantly (it
+        // may have been written by the extension — cold app opens show
+        // data, not a spinner), then subscribe to the provider's live
+        // pushes; the _refresh() below still fires the first real round
+        this._loadDiskFeed();
+        this._watchSharedFeed();
         this._t0 = GLib.get_monotonic_time() / 1e6;   // TG_TIMING anchor
         this._refresh();
         // chart and news don't need the quote round: fire them in
@@ -3407,6 +3421,98 @@ class TickerWindow extends Adw.ApplicationWindow {
         this._settings.set_string('selected-symbol', sym);
     }
 
+    /* ── shared feed (extension provider + disk snapshot) ──────────────
+     * The extension is this app's background service: one fetcher for
+     * both processes (single Yahoo quota), the disk snapshot for cold
+     * boots, the Updated signal for live. No extension installed?
+     * Every path below no-ops and the app polls itself as always. */
+    _loadDiskFeed() {
+        const snap = loadSnapshot();
+        if (snap)
+            this._applyFeed(snap.quotes, snap.at, snap.source);
+    }
+
+    _watchSharedFeed() {
+        this._sharedId = 0;
+        const subscribe = () => {
+            if (this._sharedId || this._dead)
+                return;
+            try {
+                this._sharedId = Gio.DBus.session.signal_subscribe(
+                    BUS_NAME, BUS_NAME, 'Updated', BUS_PATH, null,
+                    Gio.DBusSignalFlags.NONE,
+                    (c, s, p, i, m, params) => {
+                        try {
+                            const [json] = params.deep_unpack();
+                            const snap = JSON.parse(json);
+                            if (!this._dead && snap.quotes?.length)
+                                this._applyFeed(snap.quotes, snap.at,
+                                                snap.source);
+                        } catch { /* provider hiccup */ }
+                    });
+            } catch { /* stay self-sufficient */ }
+        };
+        const drop = () => {
+            if (this._sharedId) {
+                try {
+                    Gio.DBus.session.signal_unsubscribe(this._sharedId);
+                } catch { /* already gone */ }
+                this._sharedId = 0;
+            }
+        };
+        Gio.DBus.session.watch_name(
+            BUS_NAME, Gio.BusNameWatcherFlags.NONE,
+            subscribe,
+            () => { drop(); });   // provider gone: own rounds resume
+        // watch_name only fires on TRANSITIONS — and the shell outlives
+        // the app, so the name is usually already there at startup
+        Gio.DBus.session.call(
+            'org.freedesktop.DBus', '/org/freedesktop/DBus',
+            'org.freedesktop.DBus', 'NameHasOwner',
+            new GLib.Variant('(s)', [BUS_NAME]),
+            new GLib.VariantType('(b)'), Gio.DBusCallFlags.NONE,
+            2000, null, (c, res) => {
+                try {
+                    const [owned] = c.call_finish(res).deep_unpack();
+                    if (owned)
+                        subscribe();
+                } catch { /* fine — self-polling is the default life */ }
+            });
+    }
+
+    /* quotes arrive already fetched (signal or disk): paint and go —
+     * no _busy/_spinner/drain bookkeeping, the extension owns the bus */
+    _applyFeed(quotes, atWall, source) {
+        if (this._dead || !quotes?.length)
+            return;
+        // the provider polls the UNION of watchlists + the app's own
+        // round shape includes a previewed loaner — the table shows
+        // the active list (+preview) and nothing else
+        const want = new Set(this._activeList()?.symbols ?? []);
+        if (this._preview?.sym)
+            want.add(this._preview.sym);
+        if (want.size)
+            quotes = quotes.filter(q => want.has(q.symbol));
+        this._quotes = quotes;
+        this._atWall = atWall ?? this._atWall;
+        if (this._hist?.symbol !== this._hero())
+            this._loadHistory();
+        this._refreshTable();
+        this._updateWatchRows();
+        this._updateHero();
+        const when = atWall
+            ? new Date(atWall * 1000).toLocaleTimeString(
+                [], {hour: '2-digit', minute: '2-digit'})
+            : '—';
+        this._setStatus(
+            `${sourceLabel(source ?? 'yahoo')} · shared feed · ${when}`);
+        if (this._sharedManual) {
+            this._sharedManual = false;
+            this._setSpinner(false);
+            this._toast('Quotes refreshed');
+        }
+    }
+
     _refresh(manual = false) {
         if (this._busy) {
             // don't drop the request: an add/remove landing mid-fetch must
@@ -3423,6 +3529,29 @@ class TickerWindow extends Adw.ApplicationWindow {
             this._busy = false;
             this._setSpinner(false);
         }
+        // provider path: while the extension serves us, our own poll
+        // ticks idle (its rounds arrive via Updated — one fetcher for
+        // the whole desktop). A manual press ASKS the provider for a
+        // round; a 15 s watchdog covers a provider that dies mid-call
+        if (this._sharedId && !this._forceBypass) {
+            if (manual) {
+                this._sharedManual = true;
+                this._setSpinner(true);
+                Gio.DBus.session.call(BUS_NAME, BUS_PATH, BUS_NAME,
+                    'Refresh', null, null, Gio.DBusCallFlags.NONE,
+                    1500, null, null, null);
+                GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 15,
+                    () => {
+                        if (!this._dead && this._sharedId && !this._busy) {
+                            this._forceBypass = true;
+                            this._refresh(true);
+                        }
+                        return GLib.SOURCE_REMOVE;
+                    });
+            }
+            return;
+        }
+        this._forceBypass = false;
         const syms = this._activeList()?.symbols ?? [];
         // a previewed hero gets its own quote too, so the panel keeps
         // ticking while it's just on loan from the search results
@@ -3472,6 +3601,12 @@ class TickerWindow extends Adw.ApplicationWindow {
                              && x.price != null))
                     this._previewQ = null;
                 this._atWall = Math.floor(GLib.get_real_time() / 1e6);
+                // leave the round on disk (shared/cache.js): a cold
+                // boot of EITHER process — or of a machine where the
+                // extension is disabled — paints this instantly
+                saveSnapshot(makeSnapshot(
+                    this._settings.get_string('data-source'),
+                    res.quotes, this._atWall));
                 this._busy = false;
                 this._busySince = 0;
                 this._setSpinner(false);

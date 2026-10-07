@@ -37,6 +37,26 @@ import {MarketClient} from './yahoo.js';
 import {TickerPanel, Tri} from './menu.js';
 import {initI18n, _} from './i18n.js';
 import {parseWatchlists} from './fmt.js';
+import {makeSnapshot, snapshotJSON, saveSnapshot,
+        loadSnapshot} from './cache.js';
+
+/* ── the D-Bus data plane ─────────────────────────────────────────────────
+ * The shell is the only always-running member of this family, so it
+ * SERVES the data: the app consumes quotes through this service instead
+ * of burning its own Yahoo quota (single fetcher, single source of
+ * truth). Deliberately a different bus name than the app's own
+ * GApplication id — the app owns dev.vijaybala.TickerGlass when it
+ * runs, and is merely a guest here. wrapJSObject/own_name/new_for_xml
+ * probed present in this shell's Gio via gjs. */
+const BUS_NAME = 'dev.vijaybala.TickerGlass.Data';
+const BUS_PATH = '/dev/vijaybala/TickerGlass/Data';
+const BUS_IFACE = Gio.DBusNodeInfo.new_for_xml(`
+<node><interface name="${BUS_NAME}">
+  <method name="GetSnapshot">
+    <arg name="json" type="s" direction="out"/></method>
+  <method name="Refresh"/>
+  <signal name="Updated"><arg name="json" type="s"/></signal>
+</interface></node>`).interfaces[0];
 
 const APP_DESKTOP_ID = 'dev.vijaybala.TickerGlass.desktop';
 
@@ -52,6 +72,8 @@ class TickerIndicator extends PanelMenu.Button {
         this._timer = 0; this._retryTimer = 0;
         this._busy = false; this._refetch = false; this._dead = false;
         this._quotes = [];
+        this._atWall = 0;
+        this._dbus = null; this._busNameId = 0;
 
         this._dark = _interfaceIsDark();
 
@@ -131,17 +153,43 @@ class TickerIndicator extends PanelMenu.Button {
         this._ifaceId = this._ifaceSettings.connect('changed',
             () => this._onIfaceChange());
 
+        // warm boot from the disk snapshot: paint whatever the last
+        // round left (the app's or ours), then let the normal schedule
+        // refresh it — a fresh login never sees an empty card
+        const snap = loadSnapshot();
+        if (snap) {
+            this._quotes = snap.quotes;
+            this._atWall = snap.at;
+            this._renderPanel();
+            this._panel.render(this._state());
+        }
+        this._serveData();
         this._fetch(true);
         this._restartTimer();
     }
 
     /* ── data ─────────────────────────────────────────────────────────── */
 
+    /* movers and the scoreboard span the WHOLE portfolio — every
+     * watchlist deduped, the active list's symbols first so a
+     * same-symbol tie keeps its home ordering. (Was: active list only,
+     * which made the board read as that watchlist's rank file rather
+     * than the day's movers across everything owned) */
     _symbols() {
         const lists = parseWatchlists(this._settings.get_string('watchlists'));
         const id = this._settings.get_string('active-watchlist');
-        const wl = lists.find(w => w.id === id) ?? lists[0];
-        return wl?.symbols ?? [];
+        const i = lists.findIndex(w => w.id === id);
+        const order = i >= 0 ? [lists[i], ...lists.filter((_, j) => j !== i)]
+                             : lists;
+        const seen = new Set();
+        const out = [];
+        for (const wl of order)
+            for (const s of wl.symbols ?? [])
+                if (!seen.has(s)) {
+                    seen.add(s);
+                    out.push(s);
+                }
+        return out;
     }
 
     _heroSymbol() {
@@ -156,9 +204,13 @@ class TickerIndicator extends PanelMenu.Button {
     }
 
     _state() {
+        const syms = this._symbols();
+        // the cache may have been written by the APP, whose rounds can
+        // carry a previewed symbol the user never watchlisted — the
+        // board shows owned names only
         return {
-            quotes: this._quotes,
-            symbols: this._symbols(),
+            quotes: this._quotes.filter(q => syms.includes(q.symbol)),
+            symbols: syms,
             hero: this._heroSymbol(),
             watchlists: parseWatchlists(this._settings.get_string('watchlists')),
             active: this._settings.get_string('active-watchlist'),
@@ -197,6 +249,7 @@ class TickerIndicator extends PanelMenu.Button {
             return;
         }
         this._busy = true;
+        this._panel?.setBusy(true);   // header shows the spinner
         const sparkRange = this._settings.get_string('panel-spark-range');
         this._client.quotes(symbols, {sparkRange})
             .then(res => {
@@ -209,6 +262,19 @@ class TickerIndicator extends PanelMenu.Button {
                               !res.quotes.some(q => q.price != null)
                     ? 'fetch' : null;
                 this._busy = false;
+                this._panel?.setBusy(false);
+                // disk for cold boots, D-Bus push for the live app —
+                // one snapshot shape, two delivery paths (cache.js)
+                const round = makeSnapshot(
+                    this._settings.get_string('data-source'),
+                    res.quotes, this._atWall);
+                saveSnapshot(round);
+                const js = snapshotJSON(round);
+                if (js)
+                    try {
+                        this._dbus?.emit_signal('Updated',
+                            new GLib.Variant('(s)', [js]));
+                    } catch { /* bus hiccup; disk copy stands */ }
                 this._renderPanel();
                 this._panel.render(this._state());
                 this._restartTimer();
@@ -223,10 +289,61 @@ class TickerIndicator extends PanelMenu.Button {
                 logError(e, 'TickerGlass');
                 this._error = /429|rate/.test(String(e)) ? 'rate' : 'fetch';
                 this._busy = false;
+                this._panel?.setBusy(false);
                 this._renderPanel();
                 this._panel.render(this._state());
                 this._restartTimer();
             });
+    }
+
+    /* ── the D-Bus provider ─────────────────────────────────────────────
+     * Serve what the fetch loop already holds: GetSnapshot answers a
+     * cold app, the Updated signal streams live rounds, Refresh lets
+     * the app's own refresh button reuse this poller instead of
+     * double-tapping Yahoo. All three ride memory + the bus: zero
+     * extra network when the app is open. */
+    _snapshotJSON() {
+        return snapshotJSON(makeSnapshot(
+            this._settings.get_string('data-source'),
+            this._quotes, this._atWall)) ?? '{"v":1}';
+    }
+
+    _serveData() {
+        try {
+            this._dbus = Gio.DBusExportedObject.wrapJSObject(BUS_IFACE, {
+                GetSnapshot: () => this._snapshotJSON(),
+                Refresh: () => { this._fetch(true); },
+            });
+            this._dbus.export(Gio.DBus.session, BUS_PATH);
+            this._busNameId = Gio.DBus.session.own_name(
+                BUS_NAME, Gio.BusNameOwnerFlags.ALLOW_REPLACEMENT,
+                null, () => { this._busNameId = 0; });
+        } catch (e) {
+            // app-side detection is by bus-name presence: on failure
+            // it simply keeps polling itself, exactly as before
+            logError(e, 'TickerGlass provider');
+        }
+    }
+
+    _stopServing() {
+        try {
+            // THIS build's binding takes NO arguments (introspection
+            // gap — live-bus probe: 2-arg call warns and no-ops, 0-arg
+            // truly detaches: calls afterwards answer UnknownObject)
+            this._dbus?.unexport();
+        } catch { /* already gone */ }
+        try {
+            // g_bus_unown_name has no introspected twin in GJS — the
+            // name releases cleanly straight off the daemon interface
+            if (this._busNameId)
+                Gio.DBus.session.call_sync('org.freedesktop.DBus',
+                    '/org/freedesktop/DBus', 'org.freedesktop.DBus',
+                    'ReleaseName', new GLib.Variant('(s)', [BUS_NAME]),
+                    new GLib.VariantType('(u)'),
+                    Gio.DBusCallFlags.NONE, 200, null);
+        } catch { /* the bus daemon will hand it out on disconnect */ }
+        this._dbus = null;
+        this._busNameId = 0;
     }
 
     /* ── the scoreboard: watchlist breadth ───────────────────────────────
@@ -306,6 +423,17 @@ class TickerIndicator extends PanelMenu.Button {
             secs = Math.min(secs, 15);          // actively reading
         else if (this._quotes.length && !live)
             secs = Math.max(secs, 1800);        // closed: check back rarely
+        else if (this._quotes.length && !this._quotes.some(
+                q => q.state === 'REGULAR'))
+            // purely after-hours (pre/post only): the board shows the
+            // extended session but nobody day-trades 5 am — 5 min floor
+            secs = Math.max(secs, 300);
+        // battery: stretch the background waits ×4 (capped at 1 h).
+        // Menu-open keeps the 15 s beat — the user is looking. Asked
+        // once per timer beat via UPower, 200 ms cap so a dead daemon
+        // never blocks the shell; no UPower (desktop) → false
+        else if (secs < 900 && this._onBattery())
+            secs = Math.min(secs * 4, 3600);
         // else: session (incl. after-hours, which we display) → user interval
         // opening the menu always forces a fresh fetch regardless
         this._timer = GLib.timeout_add_seconds(GLib.PRIORITY_LOW, secs, () => {
@@ -313,6 +441,22 @@ class TickerIndicator extends PanelMenu.Button {
             this._fetch(true);
             return GLib.SOURCE_REMOVE;
         });
+    }
+
+    _onBattery() {
+        try {
+            const [, v] = Gio.DBus.session.call_sync(
+                'org.freedesktop.UPower',
+                '/org/freedesktop/UPower/devices/DisplayDevice',
+                'org.freedesktop.DBus.Properties', 'Get',
+                new GLib.Variant('(ss)',
+                    ['org.freedesktop.UPower.Device', 'OnBattery']),
+                new GLib.VariantType('(v)'),
+                Gio.DBusCallFlags.NONE, 200, null);
+            return v.unpack() === true;
+        } catch {
+            return false;      // desktop, dead daemon, or bus noise
+        }
     }
 
     _onSetting(key) {
@@ -358,6 +502,7 @@ class TickerIndicator extends PanelMenu.Button {
 
     destroy() {
         this._dead = true;
+        this._stopServing();
         for (const id of [this._timer, this._retryTimer])
             if (id)
                 GLib.source_remove(id);
