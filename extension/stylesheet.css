@@ -103,12 +103,17 @@
  * the full card/column width); rows wear .tg-row and get hover/press
  * feedback — they launch the app */
 .tg-sec-h { font-size: 0.95em; font-weight: 700; letter-spacing: 0.06em;
-            padding: 8px 14px 5px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+            padding: 8px 14px 3px;
             /* St-18 clamped this to a width that ellipsized 'Top
              * losers'; same min-width lever as the tiles: 292 + the
              * 28px side padding = the gutted content width (330-8) */
             min-width: 292px; }
+/* hairline under each header — a real 1px widget, not a CSS border
+ * (St-18 doesn't paint border-bottom on the label); width matches the
+ * tiles so the line reads as the board's own rule */
+.tg-sec-rule { min-height: 1px; min-width: 300px;
+               background-color: rgba(255, 255, 255, 0.14); }
+.tg-2col .tg-sec-rule { min-width: 218px; }
 .tg-sec-up { color: #46d98b; }
 .tg-sec-down { color: #ff7a80; }
 .tg-nomove { color: rgba(255, 255, 255, 0.45); font-size: 0.85em;
@@ -161,7 +166,7 @@
 .tg-content.tg-light-ink .tg-title   { color: rgba(16, 24, 35, 0.92); }
 .tg-content.tg-light-ink .tg-nomove  { color: rgba(16, 24, 35, 0.55); }
 .tg-content.tg-light-ink .tg-row-name { color: rgba(16, 24, 35, 0.6); }
-.tg-content.tg-light-ink .tg-sec-h { border-bottom-color: rgba(16, 24, 35, 0.16); }
+.tg-content.tg-light-ink .tg-sec-rule { background-color: rgba(16, 24, 35, 0.16); }
 .tg-content.tg-light-ink .tg-updated { color: rgba(16, 24, 35, 0.5); }
 .tg-content.tg-light-ink .tg-status-shut { color: rgba(16, 24, 35, 0.55); }
 

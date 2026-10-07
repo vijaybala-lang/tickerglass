@@ -311,6 +311,10 @@ export class TickerPanel {
             lbl.add_style_class_name(cls);
             return lbl;
         };
+        /* hairline under each header: a CSS border-bottom on the label
+         * did NOT paint in St-18, so this is a real 1px widget with a
+         * background-color — the one paint path proven in this world */
+        const rule = () => new St.BoxLayout({style_class: 'tg-sec-rule'});
         /* two-column board (default): gainers left, losers right — the
          * scoreboard read, half the vertical stretch. When one side is
          * empty the card narrows itself back to stacked rows: a column
@@ -323,6 +327,7 @@ export class TickerPanel {
             c.add_child(section(up ? _('▲  Top gainers')
                                    : _('▼  Top losers'),
                                 up ? 'tg-sec-up' : 'tg-sec-down'));
+            c.add_child(rule());
             for (const q of qs)
                 c.add_child(this._mkRow(q));
             return c;
@@ -338,32 +343,18 @@ export class TickerPanel {
             if (g.length) {
                 this._rows.add_child(section(_('▲  Top gainers'),
                                              'tg-sec-up'));
+                this._rows.add_child(rule());
                 for (const q of g)
                     this._rows.add_child(this._mkRow(q));
             }
             if (l.length) {
                 this._rows.add_child(section(_('▼  Top losers'),
                                              'tg-sec-down'));
+                this._rows.add_child(rule());
                 for (const q of l)
                     this._rows.add_child(this._mkRow(q));
             }
         }
-
-        /* TEMP allocation forensics (journal '[tg]'): St-18 centers/
-         * clamps children in ways theory can't reach — numbers end
-         * the guessing. Remove once layout is confirmed stable. */
-        const kids = this._rows.get_children();
-        console.log(`[tg] rebuild: ${kids.length} children, ` +
-            `rows pref=${this._rows.get_preferred_width()}`);
-        GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
-            const probe = kids.slice(0, 3).map(k =>
-                `${(k.get_style_class() ?? '?').split(' ')[0]}` +
-                `:w=${k.get_width()},pref=${k.get_preferred_width()}` +
-                (k.get_child ? `,child:child.w=${k.get_child().get_width()},` +
-                    `pref=${k.get_child().get_preferred_width()}` : ''));
-            console.log('[tg] alloc: ' + probe.join(' | '));
-            return GLib.SOURCE_REMOVE;
-        });
     }
 
     /* THE app's sidebar tile, ported column-for-column from
