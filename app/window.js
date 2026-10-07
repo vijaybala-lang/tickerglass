@@ -296,6 +296,11 @@ class TickerWindow extends Adw.ApplicationWindow {
 
         this._rebuildTable();
         this._rebuildSidebar();
+        // 52W retired from the chip row: a legacy stored choice moves
+        // to its identical-window successor so the active-chip
+        // highlight lands and the chart looks exactly like it did
+        if (this._settings.get_string('chart-range') === '52w')
+            this._settings.set_string('chart-range', '1y');
         // shared-feed boot: paint the last on-disk round instantly (it
         // may have been written by the extension — cold app opens show
         // data, not a spinner), then subscribe to the provider's live
