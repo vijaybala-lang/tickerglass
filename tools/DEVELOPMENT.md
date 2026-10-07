@@ -31,6 +31,7 @@ otherwise have been discovered at a login screen:
 | GJS property surface | `strings /usr/lib64/gnome-shell/St-*.typelib \| grep ...` before using an St property | `toggle_style_class_name` (does not exist), `x_fill` (removed in GNOME 50 — passing it in a constructor THROWS and kills render) |
 | layout defaults in St-18 | align/expand claims ONLY work in the CONSTRUCTOR (post-init assigns are silently dead — proven by 0048194's x_align doing nothing); St.Bin/Button centers its child at natural width and the ONLY measured lever is CSS `min-width` on the child (content-box: min-width + padding must fit the parent) | row content floating as an island in the card; 'Top losers' header ellipsizing |
 | St-18 paint surface | dividers = a 1px widget with `background-color` — CSS `border-bottom` on a label does NOT paint; `Clutter.Actor.get_preferred_width()` now needs its for_size arg (a zero-arg call THROWS — the temporary [tg] probe learned this by crashing every render) | hairline silently absent; menu clock dead + a journal stack per fetch |
+| St-18 child geometry | margins for layout children ride **CSS padding on a real wrapper** — CSS `margin` on the bare child AND ctor `margin_*` GProperty bag entries both applied NOTHING to a 1px BoxLayout child (CSS margin visibly works on buttons like `.tg-open-app`, so it is child-kind-specific); ctor `x_align/x_expand` claims make the child span the wrapper's content box | hairline ran edge-to-edge through three fix attempts |
 | app-side | relaunch app, grep stderr | anything |
 
 ## Deploy loop

@@ -112,16 +112,18 @@
  * the full card/column width); rows wear .tg-row and get hover/press
  * feedback — they launch the app */
 .tg-sec-h { font-size: 0.95em; font-weight: 700; letter-spacing: 0.06em;
-            padding: 8px 14px 3px;
+            padding: 8px 14px 6px;
             /* St-18 clamped this to a width that ellipsized 'Top
              * losers'; same min-width lever as the tiles: 292 + the
              * 28px side padding = the gutted content width (330-8) */
             min-width: 292px; }
 /* hairline under each header — a real 1px widget, not a CSS border
- * (St-18 doesn't paint border-bottom on the label). Its 14px side
- * insets and 8px under-gap are set as Clutter MARGIN PROPERTIES in
- * menu.js rule(), deliberately not CSS; min-widths are the old edge-
- * to-edge spans minus those 28px of margins */
+ * (St-18 doesn't paint border-bottom on the label). The 14px side
+ * insets and 8px under-gap live as CSS padding on the .tg-rule-pad
+ * wrapper (margin — CSS or actor-property — refused to apply to the
+ * bare line); min-widths are the old edge-to-edge spans minus the
+ * 28px of wrapper padding */
+.tg-rule-pad { padding: 0 14px 8px; }
 .tg-sec-rule { min-height: 1px; min-width: 272px;
                background-color: rgba(255, 255, 255, 0.14); }
 .tg-2col .tg-sec-rule { min-width: 190px; }

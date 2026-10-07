@@ -366,18 +366,24 @@ export class TickerPanel {
         /* hairline under each header: a CSS border-bottom on the label
          * did NOT paint in St-18, so this is a real 1px widget with a
          * background-color — the one paint path proven in this world.
-         * Geometry rides real margin properties, not CSS margin (hot
-         * CSS delivery is unverifiable here): side insets match the
-         * 14px header padding, 8px under keeps the tiles off the line */
-        const rule = () => new St.BoxLayout({style_class: 'tg-sec-rule',
-                                             // dashed GProperties ride the
-                                             // ctor bag with underscores —
-                                             // set_margin_start/end do NOT
-                                             // exist in Clutter-18 (typelib
-                                             // strings-dumped to confirm)
-                                             margin_left: 14,
-                                             margin_right: 14,
-                                             margin_bottom: 8});
+         * Geometry: neither CSS margin nor ctor margin_* properties
+         * applied to the bare line (both tried, both measured absent
+         * on-screen), so the insets ride CSS PADDING on a real wrapper
+         * — the mechanism every working widget in this card uses. */
+        const rule = () => {
+            const line = new St.BoxLayout({style_class: 'tg-sec-rule',
+                                           // ctor claims (the ctor-only
+                                           // law): span the wrapper's
+                                           // content box, not natural
+                                           // min-width centered
+                                           x_align: Clutter.ActorAlign.FILL,
+                                           x_expand: true});
+            const pad = new St.BoxLayout({style_class: 'tg-rule-pad',
+                                          x_align: Clutter.ActorAlign.FILL,
+                                          x_expand: true});
+            pad.add_child(line);
+            return pad;
+        };
         /* two-column board (default): gainers left, losers right — the
          * scoreboard read, half the vertical stretch. When one side is
          * empty the card narrows itself back to stacked rows: a column
