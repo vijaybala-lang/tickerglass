@@ -796,6 +796,10 @@ const NASDAQ_API = 'https://api.nasdaq.com';
 
 const NASDAQ_STATE = {
     Regular: 'REGULAR', 'Pre-Market': 'PRE', 'Post-Market': 'POST',
+    // the API actually sends 'After-Hours' (live probe, 6:15 pm ET) —
+    // the mapping's 'Post-Market' key never matched, so after-hours
+    // rounds silently fell to the REGULAR default
+    'After-Hours': 'POST',
     Closed: 'CLOSED',
 };
 
@@ -1026,9 +1030,19 @@ export class NasdaqClient {
 
     _quoteFrom(sym, d, spark) {
         const p = d.primaryData ?? {};
-        const price = parseNum(p.lastSalePrice);
-        const change = parseNum(p.netChange);
-        const pct = parseNum(p.percentageChange);
+        const st = NASDAQ_STATE[d.marketStatus] ?? 'REGULAR';
+        // Outside the regular session primaryData speaks the EXTENDED
+        // print (probe @6:21 pm ET: 336.8006 / +0.04% = the after-hours
+        // pool vs today's close) while secondaryData speaks the regular
+        // session (336.67 / +3.04 / +0.91% = today vs yesterday). The
+        // headline is the regular session — same rule yahoo.js's
+        // normalizeQuote follows; the extended print rides as a
+        // secondary field for the hero's After-hours chip.
+        const sd = d.secondaryData ?? {};
+        const h = (st !== 'REGULAR' && sd.lastSalePrice != null) ? sd : p;
+        const price = parseNum(h.lastSalePrice);
+        const change = parseNum(h.netChange);
+        const pct = parseNum(h.percentageChange);
         const wk = (d.keyStats?.fiftyTwoWeekHighLow?.value ?? '')
             .split('-').map(t => parseNum(t));
         const dr = (d.keyStats?.dayrange?.value ?? '')
@@ -1039,6 +1053,15 @@ export class NasdaqClient {
             price,
             prevClose: price != null && change != null ? price - change : null,
             change, changePct: pct != null ? pct / 100 : null,
+            // extended-session prints (primaryData during PRE/POST):
+            // the after-hours pct Nasdaq publishes is already close-
+            // relative — matching our secondary-field convention
+            preMarketPrice: st === 'PRE' ? parseNum(p.lastSalePrice) : null,
+            preMarketChangePct: st === 'PRE'
+                ? parseNum(p.percentageChange) / 100 : null,
+            postMarketPrice: st === 'POST' ? parseNum(p.lastSalePrice) : null,
+            postMarketChangePct: st === 'POST'
+                ? parseNum(p.percentageChange) / 100 : null,
             // dayrange reads "low-high" like the 52W string (probe:
             // dr[0]=111.53 was the LOW while dayLow field said 112.41 —
             // the first cut here had the pair swapped and the chips
@@ -1050,7 +1073,7 @@ export class NasdaqClient {
             currency: p.currency || 'USD',
             exchange: d.exchange ?? '',
             type: 'EQUITY',
-            state: NASDAQ_STATE[d.marketStatus] ?? 'REGULAR',
+            state: st,
             tz: 'America/New_York',
             marketTime: null,
             spark: spark ? subsample(spark, 40) : null,
@@ -1059,8 +1082,14 @@ export class NasdaqClient {
 
     _metaFrom(sym, d) {
         const p = d?.primaryData ?? {};
-        const price = parseNum(p.lastSalePrice);
-        const change = parseNum(p.netChange);
+        // same regular-session-headline rule as _quoteFrom: outside
+        // REGULAR the story lives in secondaryData (336.67/+0.91%),
+        // not in primaryData's extended print (336.80/+0.04%)
+        const st = NASDAQ_STATE[d?.marketStatus] ?? 'REGULAR';
+        const sd = d?.secondaryData ?? {};
+        const h = (st !== 'REGULAR' && sd.lastSalePrice != null) ? sd : p;
+        const price = parseNum(h.lastSalePrice);
+        const change = parseNum(h.netChange);
         const wk = (d?.keyStats?.fiftyTwoWeekHighLow?.value ?? '')
             .split('-').map(t => parseNum(t));
         const dr = (d?.keyStats?.dayrange?.value ?? '')
@@ -1070,7 +1099,7 @@ export class NasdaqClient {
             prevClose: price != null && change != null ? price - change : null,
             currency: p.currency || 'USD',
             exchange: d?.exchange ?? '',
-            state: NASDAQ_STATE[d?.marketStatus] ?? 'REGULAR',
+            state: st,
             tz: 'America/New_York',
             marketTime: null,
             wk52High: wk[1] ?? null, wk52Low: wk[0] ?? null,
@@ -1217,8 +1246,15 @@ export class NasdaqClient {
             const ch = await this._chartSeries(symbol, ac);
             points = ch.points;
             if (ch.data) {
-                meta.price = parseNum(ch.data.lastSalePrice) ?? meta.price;
-                meta.prevClose = parseNum(ch.data.previousClose) ?? meta.prevClose;
+                // meta's own values (regular-session rule in
+                // _metaFrom) win: the chart feed speaks the extended
+                // print — its lastSalePrice is the after-hours tick
+                // and its previousClose an unreliable stranger (live
+                // probe: 332.89 when every /info field AND Yahoo both
+                // say 333.63). Chart values only fill holes.
+                meta.price = meta.price ?? parseNum(ch.data.lastSalePrice);
+                meta.prevClose = meta.prevClose ??
+                    parseNum(ch.data.previousClose);
                 meta.volume = parseNum(ch.data.volume) ?? meta.volume;
             }
             if (!points.length) {
@@ -1227,6 +1263,23 @@ export class NasdaqClient {
                 const now = new Date();
                 points = await this._daily(symbol, ac,
                     mdym(new Date(now.getTime() - 9 * 86400e3)), mdym(now), 10);
+            }
+            // Nasdaq payloads carry no currentTradingPeriod, but this
+            // API only speaks US equities: 04:00 / 09:30–16:00 / 20:00
+            // ET. Compute the slots from the last bar's day so the
+            // gray-zone frame gets the shape Yahoo's meta provides.
+            // GLib DST-handles the timezone construction.
+            if (points.length) {
+                const tz = GLib.TimeZone.new('America/New_York');
+                const day = GLib.DateTime.new_from_unix_local(
+                    points.at(-1).t).to_timezone(tz);
+                const at = (hh, mm) => GLib.DateTime.new(tz,
+                    day.get_year(), day.get_month(), day.get_day_of_month(),
+                    hh, mm, 0).to_unix();
+                meta.extStart = at(4, 0);
+                meta.sessionStart = at(9, 30);
+                meta.sessionEnd = at(16, 0);
+                meta.extEnd = at(20, 0);
             }
         } else {
             const days = RANGE_DAYS[range] ?? 30;
