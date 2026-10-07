@@ -179,8 +179,12 @@ export class TickerPanel {
         head.style_class = 'tg-header';
         head.add_child(label(_("Today's Top Movers"), 'tg-title'));
         head.add_child(spacer());
+        // y_align in the CONSTRUCTOR (the ctor-only law): without the
+        // claim the badge FILLs the header's cross axis and the pill
+        // stretches into a tall ellipse
         this._statusLbl = new St.Label({text: '',
-                                        style_class: 'tg-status-badge'});
+                                        style_class: 'tg-status-badge',
+                                        y_align: Clutter.ActorAlign.CENTER});
         head.add_child(this._statusLbl);
         /* settings rides the header next to refresh — the footer is
          * just the clock now; the two utility buttons live together */
@@ -194,6 +198,10 @@ export class TickerPanel {
                                           can_focus: true});
         this._refreshIcon = new St.Icon({icon_name: 'view-refresh-symbolic',
                                          icon_size: 16});
+        // Clutter rotates around pivot-point, which DEFAULTS to the
+        // actor's top-left corner — the spin looked like a wobble. The
+        // icon is 16px, so the center is (8, 8).
+        this._refreshIcon.set_pivot_point(8, 8);
         this._refreshBtn.set_child(this._refreshIcon);
         this._refreshBtn.connect('clicked', () => {
             this._spinRefresh();        // immediate proof the click landed

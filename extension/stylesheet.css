@@ -63,7 +63,7 @@
 /* market-state badge — the app's .tg-chip-static ported (pill, 1px
  * border, low-alpha ink wash; St-18 has no alpha(currentcolor) so the
  * dark/light inks are spelled out in the light-ink block below) */
-.tg-status-badge { font-size: 0.72em; font-weight: 700;
+.tg-status-badge { font-size: 0.72em; font-weight: 400;
                    padding: 1px 10px; border-radius: 99px;
                    background-color: rgba(255, 255, 255, 0.06);
                    border: 1px solid rgba(255, 255, 255, 0.10);
@@ -118,11 +118,12 @@
              * 28px side padding = the gutted content width (330-8) */
             min-width: 292px; }
 /* hairline under each header — a real 1px widget, not a CSS border
- * (St-18 doesn't paint border-bottom on the label); width matches the
- * tiles so the line reads as the board's own rule */
-.tg-sec-rule { min-height: 1px; min-width: 300px;
+ * (St-18 doesn't paint border-bottom on the label); inset like the
+ * header text and tile content (14px), so it reads as content, not a
+ * frame; min-widths are the old spans minus the 28px of margins */
+.tg-sec-rule { min-height: 1px; min-width: 272px; margin: 0 14px;
                background-color: rgba(255, 255, 255, 0.14); }
-.tg-2col .tg-sec-rule { min-width: 218px; }
+.tg-2col .tg-sec-rule { min-width: 190px; }
 .tg-sec-up { color: #46d98b; }
 .tg-sec-down { color: #ff7a80; }
 .tg-nomove { color: rgba(255, 255, 255, 0.45); font-size: 0.85em;
