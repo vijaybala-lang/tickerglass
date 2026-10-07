@@ -118,12 +118,11 @@
              * 28px side padding = the gutted content width (330-8) */
             min-width: 292px; }
 /* hairline under each header — a real 1px widget, not a CSS border
- * (St-18 doesn't paint border-bottom on the label); inset like the
- * header text and tile content (14px), so it reads as content, not a
- * frame; 5px under keeps the line from sitting flush on the first
- * tile (the column runs spacing 0); min-widths are the old spans
- * minus the 28px of margins */
-.tg-sec-rule { min-height: 1px; min-width: 272px; margin: 0 14px 5px;
+ * (St-18 doesn't paint border-bottom on the label). Its 14px side
+ * insets and 8px under-gap are set as Clutter MARGIN PROPERTIES in
+ * menu.js rule(), deliberately not CSS; min-widths are the old edge-
+ * to-edge spans minus those 28px of margins */
+.tg-sec-rule { min-height: 1px; min-width: 272px;
                background-color: rgba(255, 255, 255, 0.14); }
 .tg-2col .tg-sec-rule { min-width: 190px; }
 .tg-sec-up { color: #46d98b; }

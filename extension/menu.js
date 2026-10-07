@@ -365,8 +365,19 @@ export class TickerPanel {
         };
         /* hairline under each header: a CSS border-bottom on the label
          * did NOT paint in St-18, so this is a real 1px widget with a
-         * background-color — the one paint path proven in this world */
-        const rule = () => new St.BoxLayout({style_class: 'tg-sec-rule'});
+         * background-color — the one paint path proven in this world.
+         * Geometry rides real margin properties, not CSS margin (hot
+         * CSS delivery is unverifiable here): side insets match the
+         * 14px header padding, 8px under keeps the tiles off the line */
+        const rule = () => new St.BoxLayout({style_class: 'tg-sec-rule',
+                                             // dashed GProperties ride the
+                                             // ctor bag with underscores —
+                                             // set_margin_start/end do NOT
+                                             // exist in Clutter-18 (typelib
+                                             // strings-dumped to confirm)
+                                             margin_left: 14,
+                                             margin_right: 14,
+                                             margin_bottom: 8});
         /* two-column board (default): gainers left, losers right — the
          * scoreboard read, half the vertical stretch. When one side is
          * empty the card narrows itself back to stacked rows: a column
