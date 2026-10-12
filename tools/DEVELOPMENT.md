@@ -19,9 +19,13 @@ disk. Proven three independent ways in one session:
    - `InstallRemoteExtension(uuid)` → looks up extensions.gnome.org
      by uuid; no local-path mode.
 
-**Therefore: every extension code change needs a logout/login.**
-Deploy early, batch changes, verify with the headless suite first —
-see the guard list below; each of these caught a bug that WOULD
+**Wrong — disproven 2026-10-11: `gnome-extensions disable UUID &&
+enable UUID` hot-reloads a user extension in-session** (journal shows
+the fresh 'loading' line; the GNOME 50 CLI dropped `reload` but the
+pair is the same thing). Still deploy early and batch — the reload
+nukes extension memory (disk cache + D-Bus guest reconnect cover it) —
+but no more logout tax on every iteration. Verify with the headless
+suite first; each of these caught a bug that WOULD
 otherwise have been discovered at a login screen:
 
 | guard | command | catches |
@@ -34,6 +38,7 @@ otherwise have been discovered at a login screen:
 | St-18 child geometry | margins for layout children ride **CSS padding on a real wrapper** — CSS `margin` on the bare child AND ctor `margin_*` GProperty bag entries both applied NOTHING to a 1px BoxLayout child (CSS margin visibly works on buttons like `.tg-open-app`, so it is child-kind-specific); ctor `x_align/x_expand` claims make the child span the wrapper's content box | hairline ran edge-to-edge through three fix attempts |
 | St-18 busy spinner | there is NO `St.Icon.spinning` and no themed spinner frames in this GNOME — animate with the file's own proven kit: `St.DrawingArea` + `vfunc_repaint` + frame timer + `queue_repaint` (the weatherglass sky pattern, already shipped here as `Tri`/`MiniSpark`); Clutter z-rotation about `pivot-point` (default = top-left corner!) was tried and reads as a wobble | "reload animation all messed up" |
 | Shell-process D-Bus | the extension can OWN a session-bus name and export interfaces (`Gio.DBusExportedObject.wrapJSObject`, `connection.own_name`, `new_for_xml` — gjs-probed on this build); single-out-arg methods return the BARE value (arrays are marshalling errors); `unexport` takes ZERO args on this binding (2-arg warns + no-ops; live-bus probe proved 0-arg detaches); `g_bus_unown_name` has no GJS twin → release via an `org.freedesktop.DBus.ReleaseName` call; self-process `call_sync` to one's own export reports bogus UnknownMethod — test with an external client (gdbus) | the app↔extension data plane (provider in extension.js, guest in window.js) |
+| GNOME 50 extension API | `Main.extensionManager.lookup(uuid)` now returns the C wrapper — `openPreferences` lives on the JS Extension instance (what `enable()` receives; keep it, WeatherGlass-style, or use `Extension.lookupByUUID`). Hot-reload without logout: `gnome-extensions disable UUID && enable UUID` — GNOME 50's CLI dropped `reload` but the pair is the same thing | gear "doesn't actually open the settings dialog" — journal showed `openPreferences is not a function` |
 | Nasdaq payload traps | `marketStatus` sends **'After-Hours'** (the mapping's `'Post-Market'` key never matched → after-hours silently read REGULAR); during PRE/POST `primaryData` speaks the EXTENDED print vs today's close (336.80/+0.04%) while `secondaryData` speaks the regular session (336.67/+0.91%) — headline must read secondary outside REGULAR; `/chart` previousClose is an unreliable stranger (332.89 when /info AND Yahoo both say 333.63) — never trust it; `/chart` series includes pre+after prints (probe: 90/390/462 bars pre/reg/post) so session bands need computed ET slots (04:00/09:30–16:00/20:00, GLib.DateTime tz-build handles DST) | "still not seeing it" — all three hit at once on data-source=nasdaq |
 | app-side | relaunch app, grep stderr | anything |
 

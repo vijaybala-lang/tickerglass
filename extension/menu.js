@@ -28,8 +28,6 @@ import GObject from 'gi://GObject';
 import St from 'gi://St';
 import Cairo from 'gi://cairo';
 
-import * as Main from 'resource:///org/gnome/shell/ui/main.js';
-
 import {paintMiniSpark, paintTri} from './spark.js';
 import {fmtPrice, fmtPct} from './fmt.js';
 import {_, N_} from './i18n.js';
@@ -313,8 +311,7 @@ export class TickerPanel {
         this.onCloseMenu?.();
         GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
             try {
-                Main.extensionManager.lookup('tickerglass@vijaybala.dev')
-                    .openPreferences();
+                this.onOpenPrefs?.();
             } catch (e) {
                 logError(e, 'TickerGlass');
             }

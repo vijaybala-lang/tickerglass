@@ -120,8 +120,12 @@ class TickerIndicator extends PanelMenu.Button {
         this._panel.onOpenSym = sym => this._openInApp(sym);
         this._panel.onOpenApp = () => this._launchApp();
         // prefs must open AFTER the popup releases its grab (menu.js
-        // calls this before lookup().openPreferences) — close now
+        // calls this before onOpenPrefs) — close now. GNOME 50 law:
+        // openPreferences lives on the JS Extension instance (the one
+        // enable() receives, kept as this._ext), NOT on what
+        // extensionManager.lookup() returns — that's the C wrapper now
         this._panel.onCloseMenu = () => this.menu.close(true);
+        this._panel.onOpenPrefs = () => this._ext.openPreferences();
         this.menu.actor.add_style_class_name('tg-menu');
         // zero the popup wrappers' chrome — but start ABOVE the panel
         // actor: .tg-content keeps its own CSS padding (4px side gut)
