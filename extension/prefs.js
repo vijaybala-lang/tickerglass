@@ -119,11 +119,15 @@ export default class TickerGlassPrefs extends ExtensionPreferences {
         /* one expander per watchlist */
         const listGroup = new Adw.PreferencesGroup();
         page.add(listGroup);
+        // AdwPreferencesGroup is NOT a plain container: get_last_child()
+        // shows its internal GtkBox, and remove() on those trips
+        // adw-preferences-group.c:430 ("non-child" ×N) without removing
+        // anything — track the rows we actually added and remove those
+        const tracked = [];
 
         const rebuild = () => {
-            for (let ch = listGroup.get_last_child(); ch;
-                 ch = listGroup.get_last_child())
-                listGroup.remove(ch);
+            for (const r of tracked.splice(0))
+                listGroup.remove(r);
             const lists = this._read(settings);
             for (const wl of lists) {
                 const exp = new Adw.ExpanderRow({
@@ -188,6 +192,7 @@ export default class TickerGlassPrefs extends ExtensionPreferences {
                 exp.add_suffix(delBtn);
 
                 listGroup.add(exp);
+                tracked.push(exp);
             }
             refreshActive();
         };
