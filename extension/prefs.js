@@ -32,6 +32,7 @@ import {initI18n, _} from './i18n.js';
 import {textPrompt} from './prompt.js';
 import {parseWatchlists, stringifyWatchlists, RANGES, RANGE_LABEL,
         INTERVALS, INTERVAL_LABEL} from './fmt.js';
+import {MarketClient} from './yahoo.js';
 
 /* a deletable list row (prefs.js ResultRow pattern, generalized) */
 const SymbolRow = GObject.registerClass(
@@ -48,6 +49,104 @@ class SymbolRow extends Adw.ActionRow {
         this.add_suffix(btn);
     }
 });
+
+/* the app's search-box typeahead, rebuilt for prefs rows: debounced
+ * catalog search (Yahoo quotes — every data source answers search,
+ * even the nasdaq route relays it), results as name+exchange rows,
+ * Enter = exact/top/raw pick. onPick gets the chosen SYMBOL. */
+function attachSuggest(entry, client, onPick) {
+    const pop = new Gtk.Popover({autohide: true});
+    const scroller = new Gtk.ScrolledWindow({
+        hscrollbar_policy: Gtk.PolicyType.NEVER,
+        min_content_height: 90, max_content_height: 300,
+        propagate_natural_height: true,
+    });
+    const results = new Gtk.ListBox();
+    results.add_css_class('boxed-list');
+    results.set_activate_on_single_click(true);
+    scroller.set_child(results);
+    pop.set_child(scroller);
+    pop.set_size_request(340, -1);
+    // no set_popover on an EntryRow: parent by hand, drop below
+    pop.set_parent(entry);
+    pop.set_position(Gtk.PositionType.BOTTOM);
+
+    let seq = 0, pending = 0, pickable = [];
+    const pick = sym => {
+        pop.popdown();
+        entry.set_text('');
+        onPick(sym);
+    };
+    const populate = items => {
+        pickable = items.filter(it => !it.pending);
+        for (let r = results.get_first_child(); r;) {
+            const next = r.get_next_sibling();
+            results.remove(r);
+            r = next;
+        }
+        for (const it of items) {
+            const row = new Adw.ActionRow({
+                title: it.symbol, subtitle: it.name,
+            });
+            if (it.pending) {
+                row.set_activatable(false);
+                results.append(row);
+                continue;
+            }
+            row.add_suffix(new Gtk.Label({
+                label: it.exchange || it.type || '',
+                css_classes: ['dim-label', 'caption'],
+                valign: Gtk.Align.CENTER,
+            }));
+            row.connect('activated', () => pick(it.symbol));
+            results.append(row);
+        }
+        if (items.some(it => !it.pending))
+            pop.popup();
+    };
+    const runSearch = text => {
+        const mySeq = ++seq;
+        const sym = text.trim().toUpperCase();
+        if (!sym) {
+            populate([]);
+            return;
+        }
+        populate([{symbol: '…', name: _('Searching\u2026'),
+                   exchange: '', type: '', pending: true}]);
+        client.search(sym).then(res => {
+            if (mySeq !== seq)
+                return;
+            populate([...(res ?? []), {
+                symbol: sym, name: _('Add this symbol directly'),
+                exchange: '', type: '',
+            }]);
+        }).catch(() => {
+            if (mySeq === seq) {
+                populate([{symbol: sym,
+                           name: _('Add this symbol directly')}]);
+            }
+        });
+    };
+    // 'notify::text' is the guarantee (Adw.EntryRow is not a
+    // Gtk.SearchEntry — no 'search-changed'; 'changed' is not
+    // documented on this row either)
+    entry.connect('notify::text', () => {
+        if (pending)
+            GLib.source_remove(pending);
+        pending = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 260, () => {
+            pending = 0;
+            runSearch(entry.get_text());
+            return GLib.SOURCE_REMOVE;
+        });
+    });
+    entry.connect('entry-activated', () => {
+        const sym = entry.get_text().trim().toUpperCase();
+        if (!sym)
+            return;
+        const hit = pickable.find(it => it.symbol === sym) ?? pickable[0];
+        pick(hit?.symbol ?? sym);
+    });
+}
 
 export default class TickerGlassPrefs extends ExtensionPreferences {
     fillPreferencesWindow(window) {
@@ -77,6 +176,10 @@ export default class TickerGlassPrefs extends ExtensionPreferences {
         });
 
         /* active picker */
+        // search catalog for the typeahead rows below — every data
+        // source answers search (the nasdaq route relays Yahoo)
+        const client = new MarketClient(settings.get_string('data-source'));
+
         const pickGroup = new Adw.PreferencesGroup();
         const activeRow = new Adw.ComboRow({title: _('Active watchlist')});
         const refreshActive = () => {
@@ -116,6 +219,56 @@ export default class TickerGlassPrefs extends ExtensionPreferences {
         pickGroup.add(addOuter);
         page.add(pickGroup);
 
+        /* the obvious one: app-style search box up top, with an
+         * explicit target list — the quiet row inside the expander
+         * never read as an input */
+        const addGroup = new Adw.PreferencesGroup({title: _('Add symbol')});
+        const addEntry = new Adw.EntryRow({
+            title: _('Search company or ticker (Apple, ^GSPC, BTC-USD\u2026)'),
+        });
+        // plain constructor: Gtk.Image.from_icon_name doesn't exist on
+        // this GTK build (4.16+ only) and new_from_* is factory style
+        addEntry.add_prefix(new Gtk.Image({
+            icon_name: 'system-search-symbolic',
+        }));
+        const addTarget = new Adw.ComboRow({title: _('Add to')});
+        // stick with the list the user picked, even after the rebuild
+        // an add triggers; default to the active watchlist
+        let targetId = null;
+        const syncTarget = () => {
+            const lists = this._read(settings);
+            addTarget.model = new Gtk.StringList({
+                strings: lists.map(w => w.name),
+            });
+            let i = lists.findIndex(w => w.id === targetId);
+            if (i < 0) {
+                i = lists.findIndex(
+                    w => w.id === settings.get_string('active-watchlist'));
+            }
+            addTarget.selected = i < 0 ? 0 : i;
+        };
+        addTarget.connect('notify::selected', () => {
+            const wl = this._read(settings)[addTarget.selected];
+            if (wl)
+                targetId = wl.id;
+        });
+        attachSuggest(addEntry, client, sym => {
+            const lists = this._read(settings);
+            const wl = lists[addTarget.selected];
+            if (!wl)
+                return;
+            if (wl.symbols.includes(sym)) {
+                addEntry.add_css_class('error');
+                return;
+            }
+            addEntry.remove_css_class('error');
+            wl.symbols.push(sym);
+            this._write(settings, lists);
+        });
+        addGroup.add(addEntry);
+        addGroup.add(addTarget);
+        page.add(addGroup);
+
         /* one expander per watchlist */
         const listGroup = new Adw.PreferencesGroup();
         page.add(listGroup);
@@ -136,10 +289,13 @@ export default class TickerGlassPrefs extends ExtensionPreferences {
                 });
 
                 const addRow = new Adw.EntryRow({
-                    title: _('Symbol (AAPL, ^GSPC, BTC-USD, EURUSD=X…)'),
+                    title: _('Add to “%s” — name or ticker ' +
+                             '(AAPL, BTC-USD…)').format(wl.name),
                 });
-                const commit = () => {
-                    const sym = addRow.get_text().trim().toUpperCase();
+                addRow.add_prefix(new Gtk.Image({
+                    icon_name: 'system-search-symbolic',
+                }));
+                attachSuggest(addRow, client, sym => {
                     if (!sym || wl.symbols.includes(sym)) {
                         addRow.add_css_class('error');
                         return;
@@ -147,8 +303,7 @@ export default class TickerGlassPrefs extends ExtensionPreferences {
                     addRow.remove_css_class('error');
                     wl.symbols.push(sym);
                     this._write(settings, lists);
-                };
-                addRow.connect('entry-activated', commit);
+                });
                 exp.add_row(addRow);
 
                 for (const sym of [...wl.symbols]) {
@@ -195,6 +350,7 @@ export default class TickerGlassPrefs extends ExtensionPreferences {
                 tracked.push(exp);
             }
             refreshActive();
+            syncTarget();
         };
         rebuild();
         settings.connect('changed::watchlists', rebuild);   // live app edits
