@@ -265,7 +265,9 @@ export default class TickerGlassPrefs extends ExtensionPreferences {
             settings.set_string('data-source', srcIds[srcRow.selected]));
         g1.add(srcRow);
 
-        const refreshRow = new Adw.SpinRow.new_with_range(
+        // static factory, NOT a class: 'new' before new_with_range is a
+        // TypeError ("not a constructor") that kills the whole dialog
+        const refreshRow = Adw.SpinRow.new_with_range(
             15, 3600, 15);
         refreshRow.title = _('Refresh quotes every');
         settings.bind('refresh-seconds', refreshRow.get_adjustment(), 'value',

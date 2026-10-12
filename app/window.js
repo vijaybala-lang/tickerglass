@@ -4508,7 +4508,9 @@ class TickerWindow extends Adw.ApplicationWindow {
         src.connect('notify::selected', () => this._settings.set_string(
             'data-source', srcIds[src.get_selected()] ?? 'yahoo'));
         g.add(src);
-        const spin = new Adw.SpinRow.new_with_range(15, 3600, 15);
+        // static factory, NOT a class: 'new' before new_with_range is a
+        // TypeError ("not a constructor") that kills the whole dialog
+        const spin = Adw.SpinRow.new_with_range(15, 3600, 15);
         spin.set_title('Refresh quotes every (seconds)');
         this._settings.bind('refresh-seconds', spin.get_adjustment(), 'value',
                             Gio.SettingsBindFlags.DEFAULT);
