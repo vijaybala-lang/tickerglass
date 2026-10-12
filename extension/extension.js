@@ -60,18 +60,52 @@ const BUS_IFACE = Gio.DBusNodeInfo.new_for_xml(`
 
 const APP_DESKTOP_ID = 'dev.vijaybala.TickerGlass.desktop';
 
-/* Google wants SYMBOL:EXCHANGE for anything ambiguous; mapped for the
- * common Yahoo-isms. Plain tickers and BTC-USD-style pairs render from
- * the bare form; fx '=X' is Yahoo syntax Google never sees. Unmapped
- * symbols go bare and Google's own fuzzy quote page decides. */
-const GOOGLE_EXCH = {
-    '^GSPC': 'INDEXSP:^GSPC', '^IXIC': 'INDEXNASDAQ:^IXIC',
-    '^DJI': 'INDEXDJX:^DJI', '^NDX': 'NASDAQ:^NDX',
-    '^RUT': 'INDEXRUSSELL:^RUT', '^VIX': 'INDEXVIX:^VIX',
+/* Google's quote ids need an exchange tail — a bare ticker lands on a
+ * generic page (title-probed: 'Google Finance' with no name). Shapes
+ * that resolve live:
+ *   stocks/ETFs  CRWD:NASDAQ, SPY:NYSEARCA (tail from the quote's own
+ *                                            exchange field)
+ *   indices      .INX:INDEXSP family — only the four title-verified
+ *   crypto       BTC-USD bare (title-verified)
+ *   forex        EURUSD=X arrives as EUR-USD (title-verified)
+ * Anything we cannot guarantee (^NDX, ^VIX, unknown exchanges)
+ * returns '' and the caller falls back to Yahoo — the right quote on
+ * Yahoo beats a generic Google page. */
+const GOOGLE_INDEX = {
+    '^GSPC': '.INX:INDEXSP',
+    '^IXIC': '.IXIC:INDEXNASDAQ',
+    '^DJI': '.DJI:INDEXDJX',
+    '^RUT': 'RUT:INDEXRUSSELL',
 };
-function googleQuote(sym) {
-    const up = sym.toUpperCase().replace('=X', '');
-    return GOOGLE_EXCH[up] ?? up;
+/* Yahoo's fullExchangeName (chart meta), Nasdaq API exchange
+ * ('NASDAQ-GS'), and screener codes — all normalized (strip
+ * non-alphanumerics, upper) — to Google's exchange names */
+const GOOGLE_EXCH = {
+    NASDAQGS: 'NASDAQ', NASDAQGM: 'NASDAQ', NASDAQCM: 'NASDAQ',
+    NASDAQ: 'NASDAQ', NMS: 'NASDAQ', NGM: 'NASDAQ', NCM: 'NASDAQ',
+    NYSE: 'NYSE', NYQ: 'NYSE', NYSEC: 'NYSE', NYSES: 'NYSE',
+    NYSEARCA: 'NYSEARCA', PCX: 'NYSEARCA', ARCA: 'NYSEARCA',
+    PSE: 'NYSEARCA',            // the Nasdaq API's label for Arca-listed
+                                // ETFs (SPY probe) — same exchange now
+    NYSEAM: 'NYSEAMERICAN', NYSEAMERICAN: 'NYSEAMERICAN',
+    NYSEMK: 'NYSEAMERICAN', ASE: 'NYSEAMERICAN',
+};
+function googleQuote(sym, exchange) {
+    const up = sym.toUpperCase();
+    if (up.endsWith('=X')) {
+        const pair = up.slice(0, -2);
+        return /^[A-Z]{6}$/.test(pair)
+            ? `${pair.slice(0, 3)}-${pair.slice(3)}` : '';
+    }
+    if (GOOGLE_INDEX[up])
+        return GOOGLE_INDEX[up];
+    if (/^[A-Z0-9.]{2,6}-[A-Z]{3}$/.test(up))
+        return up;                       // crypto
+    const g = GOOGLE_EXCH[(exchange || '').toUpperCase()
+        .replace(/[^A-Z0-9]/g, '')];
+    if (g && /^[A-Z][A-Z0-9.$-]{0,9}$/.test(up))
+        return `${up}:${g}`;
+    return '';
 }
 
 /* ── the indicator ──────────────────────────────────────────────────────── */
@@ -411,8 +445,10 @@ class TickerIndicator extends PanelMenu.Button {
             this._openInApp(sym);
             return;
         }
-        const url = t === 'google'
-            ? `https://www.google.com/finance/quote/${googleQuote(sym)}`
+        const q = this._quotes.find(x => x.symbol === sym);
+        const code = t === 'google' ? googleQuote(sym, q?.exchange) : '';
+        const url = code
+            ? `https://www.google.com/finance/quote/${code}`
             : `https://finance.yahoo.com/quote/${encodeURIComponent(sym)}`;
         try {
             Gio.AppInfo.launch_default_for_uri(url, null);
