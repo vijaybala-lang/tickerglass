@@ -67,9 +67,21 @@ function attachSuggest(entry, client, onPick) {
     scroller.set_child(results);
     pop.set_child(scroller);
     pop.set_size_request(340, -1);
+    // the ENTRY is the keyboard host: a mapping popover steals focus,
+    // and with Adw.EntryRow (unlike the app's Gtk.SearchEntry) the
+    // caret never comes back — typeahead would die after the first
+    // keystroke. Nothing in here may be focusable; single-click
+    // activation stays fully mouse-driven, Enter picks from the entry
+    // (see entry-activated below). Belt: re-grab after every popup.
+    scroller.set_can_focus(false);
+    results.set_can_focus(false);
     // no set_popover on an EntryRow: parent by hand, drop below
     pop.set_parent(entry);
     pop.set_position(Gtk.PositionType.BOTTOM);
+    entry.connect('notify::has-focus', () => {
+        if (!entry.is_focus())
+            pop.popdown();
+    });
 
     let seq = 0, pending = 0, pickable = [];
     const pick = sym => {
@@ -88,6 +100,7 @@ function attachSuggest(entry, client, onPick) {
             const row = new Adw.ActionRow({
                 title: it.symbol, subtitle: it.name,
             });
+            row.set_can_focus(false);
             if (it.pending) {
                 row.set_activatable(false);
                 results.append(row);
@@ -101,8 +114,10 @@ function attachSuggest(entry, client, onPick) {
             row.connect('activated', () => pick(it.symbol));
             results.append(row);
         }
-        if (items.some(it => !it.pending))
+        if (items.some(it => !it.pending)) {
             pop.popup();
+            entry.grab_focus();
+        }
     };
     const runSearch = text => {
         const mySeq = ++seq;
