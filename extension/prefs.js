@@ -382,8 +382,7 @@ export default class TickerGlassPrefs extends ExtensionPreferences {
         g.description = _('The panel counts how many symbols in the ' +
             'active watchlist are up (▲) and down (▼) today. The menu ' +
             'lists its five biggest gainers and five biggest losers — ' +
-            'click a ticker to open it in the app, in the first list ' +
-            'that contains it.');
+            'click a ticker to open it wherever you chose below.');
         page.add(g);
 
         const g2 = new Adw.PreferencesGroup({title: _('Dropdown rows')});
@@ -409,6 +408,24 @@ export default class TickerGlassPrefs extends ExtensionPreferences {
                                 sparkIds[sparkRow.selected]));
         g2.add(sparkRow);
         page.add(g2);
+
+        const g3 = new Adw.PreferencesGroup({title: _('On click')});
+        const openIds = ['auto', 'app', 'yahoo', 'google'];
+        const openRow = new Adw.ComboRow({
+            title: _('Where a ticker opens'),
+            model: new Gtk.StringList({strings: [
+                _('TickerGlass app when installed, else Yahoo Finance'),
+                _('TickerGlass app'),
+                _('Yahoo Finance'),
+                _('Google Finance'),
+            ]}),
+        });
+        openRow.selected = Math.max(0, openIds.indexOf(
+            settings.get_string('ticker-target')));
+        openRow.connect('notify::selected', () =>
+            settings.set_string('ticker-target', openIds[openRow.selected]));
+        g3.add(openRow);
+        page.add(g3);
         return page;
     }
 

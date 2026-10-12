@@ -60,6 +60,20 @@ const BUS_IFACE = Gio.DBusNodeInfo.new_for_xml(`
 
 const APP_DESKTOP_ID = 'dev.vijaybala.TickerGlass.desktop';
 
+/* Google wants SYMBOL:EXCHANGE for anything ambiguous; mapped for the
+ * common Yahoo-isms. Plain tickers and BTC-USD-style pairs render from
+ * the bare form; fx '=X' is Yahoo syntax Google never sees. Unmapped
+ * symbols go bare and Google's own fuzzy quote page decides. */
+const GOOGLE_EXCH = {
+    '^GSPC': 'INDEXSP:^GSPC', '^IXIC': 'INDEXNASDAQ:^IXIC',
+    '^DJI': 'INDEXDJX:^DJI', '^NDX': 'NASDAQ:^NDX',
+    '^RUT': 'INDEXRUSSELL:^RUT', '^VIX': 'INDEXVIX:^VIX',
+};
+function googleQuote(sym) {
+    const up = sym.toUpperCase().replace('=X', '');
+    return GOOGLE_EXCH[up] ?? up;
+}
+
 /* ── the indicator ──────────────────────────────────────────────────────── */
 const TickerIndicator = GObject.registerClass(
 class TickerIndicator extends PanelMenu.Button {
@@ -114,10 +128,11 @@ class TickerIndicator extends PanelMenu.Button {
         const section = new PopupMenu.PopupMenuSection();
         section.actor.add_child(this._panel.actor);
         this.menu.addMenuItem(section);
-        // a mover row is a jump-off: point the app at the first
-        // watchlist containing that ticker, then bring its window up;
-        // the footer button is the same launch without the re-point
-        this._panel.onOpenSym = sym => this._openInApp(sym);
+        // a mover row is a jump-off: what "jump" means is the user's
+        // call (ticker-target: the app, Yahoo, Google, or auto); the
+        // app path also re-points the first watchlist containing the
+        // ticker; the footer button stays the explicit app launch
+        this._panel.onOpenSym = sym => this._openSymbol(sym);
         this._panel.onOpenApp = () => this._launchApp();
         // prefs must open AFTER the popup releases its grab (menu.js
         // calls this before onOpenPrefs) — close now. GNOME 50 law:
@@ -381,6 +396,42 @@ class TickerIndicator extends PanelMenu.Button {
      * running instance, so this focuses the window instead of doubling
      * it; the app watches both settings keys, so a running instance
      * re-points itself without a restart */
+    /**
+     * Click-policy seam. 'auto' (the default) is the no-config path:
+     * TickerGlass if its desktop entry is found, else the Yahoo quote
+     * in the browser. The ticker-target pref overrides to a fixed
+     * destination. Web targets hand off to the default browser via
+     * gio — no shell-side window, and it survives the app being
+     * uninstalled (the point of the feature).
+     */
+    _openSymbol(sym) {
+        const t = this._settings.get_string('ticker-target');
+        const app = t === 'app' || (t === 'auto' && this._appInstalled());
+        if (app) {
+            this._openInApp(sym);
+            return;
+        }
+        const url = t === 'google'
+            ? `https://www.google.com/finance/quote/${googleQuote(sym)}`
+            : `https://finance.yahoo.com/quote/${encodeURIComponent(sym)}`;
+        try {
+            Gio.AppInfo.launch_default_for_uri(url, null);
+        } catch (e) {
+            logError(e, 'TickerGlass');
+            this._openInApp(sym);     // never dead-end a click
+        }
+    }
+
+    _appInstalled() {
+        try {
+            return Gio.AppInfo.get_all().some(
+                a => a.get_id() === APP_DESKTOP_ID);
+        } catch (e) {
+            logError(e, 'TickerGlass');
+            return false;
+        }
+    }
+
     _openInApp(sym) {
         const lists = parseWatchlists(this._settings.get_string('watchlists'));
         const wl = lists.find(w => (w.symbols ?? []).includes(sym));

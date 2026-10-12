@@ -55,6 +55,18 @@
       <description>'dollars' shows the absolute move, 'pct' the percentage over the visible range</description>
     </key>
 
+    <key name="ticker-target" type="s">
+      <default>'auto'</default>
+      <choices>
+        <choice value='auto'/>
+        <choice value='app'/>
+        <choice value='yahoo'/>
+        <choice value='google'/>
+      </choices>
+      <summary>Where a clicked ticker opens</summary>
+      <description>'auto' opens the TickerGlass app when it is installed, otherwise Yahoo Finance; 'app' always launches TickerGlass; 'yahoo' and 'google' open the quote in the default browser</description>
+    </key>
+
     <!-- ── data ────────────────────────────────────────────────────────── -->
     <key name="data-source" type="s">
       <default>'yahoo'</default>
