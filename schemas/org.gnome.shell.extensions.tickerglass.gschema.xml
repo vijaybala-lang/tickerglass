@@ -67,6 +67,16 @@
       <description>'auto' opens the TickerGlass app when it is installed, otherwise Yahoo Finance; 'app' always launches TickerGlass; 'yahoo' and 'google' open the quote in the default browser</description>
     </key>
 
+    <key name="panel-display" type="s">
+      <default>'counts'</default>
+      <choices>
+        <choice value='counts'/>
+        <choice value='indices'/>
+      </choices>
+      <summary>What the top bar shows</summary>
+      <description>'counts' is the ▲ gainers / ▼ losers tally of your holdings; 'indices' swaps it for the day's move of the S&amp;P 500, Dow and Nasdaq — fetched on the same round, never counted as holdings</description>
+    </key>
+
     <!-- ── data ────────────────────────────────────────────────────────── -->
     <key name="data-source" type="s">
       <default>'yahoo'</default>

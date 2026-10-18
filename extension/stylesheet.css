@@ -34,6 +34,13 @@
 .tg-panel-box .tg-sep  { color: rgba(255, 255, 255, 0.30); }
 .tg-panel-box .tg-dim  { color: rgba(255, 255, 255, 0.35); }
 
+/* index dials swap in for the ▲▼ counts (panel-display 'indices');
+ * names whisper, the pct carries the count's palette */
+.tg-dialbox { spacing: 10px; }
+.tg-panel-box .tg-dial-name { color: rgba(255, 255, 255, 0.55); }
+.tg-panel-box .tg-dial-up   { color: #2eff8f; }
+.tg-panel-box .tg-dial-down { color: #ff5c6c; }
+
 /* ── popup chrome ───────────────────────────────────────────────────────── */
 /* compound selector outranks the theme's popup padding (weatherglass trick) */
 .tg-menu.popup-menu-content,
@@ -211,3 +218,6 @@
 .tg-panel-box.tg-light-bar .tg-lcnt { color: #d64550; }
 .tg-panel-box.tg-light-bar .tg-sep  { color: rgba(0, 0, 0, 0.35); }
 .tg-panel-box.tg-light-bar .tg-dim  { color: rgba(0, 0, 0, 0.42); }
+.tg-panel-box.tg-light-bar .tg-dial-name { color: rgba(0, 0, 0, 0.55); }
+.tg-panel-box.tg-light-bar .tg-dial-up   { color: #0f9d58; }
+.tg-panel-box.tg-light-bar .tg-dial-down { color: #d64550; }

@@ -36,7 +36,7 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {MarketClient} from './yahoo.js';
 import {TickerPanel, Tri} from './menu.js';
 import {initI18n, _} from './i18n.js';
-import {parseWatchlists} from './fmt.js';
+import {parseWatchlists, fmtPct} from './fmt.js';
 import {makeSnapshot, snapshotJSON, saveSnapshot,
         loadSnapshot} from './cache.js';
 
@@ -108,6 +108,17 @@ function googleQuote(sym, exchange) {
     return '';
 }
 
+/* Top-bar index dials (the optional face-lift of the ▲▼ counts): the
+ * three big gauges ride the same round and the same quote pool, yet
+ * belong to no watchlist — _state(), the counts, and the app-facing
+ * snapshot all measure _symbols() (owners only), so a dial never
+ * ranks as a 'top gainer' nor leaks into the app */
+const INDEX_DIALS = [
+    {sym: '^GSPC', name: 'S&P'},
+    {sym: '^DJI', name: 'Dow'},
+    {sym: '^IXIC', name: 'Nasdaq'},
+];
+
 /* ── the indicator ──────────────────────────────────────────────────────── */
 const TickerIndicator = GObject.registerClass(
 class TickerIndicator extends PanelMenu.Button {
@@ -151,6 +162,24 @@ class TickerIndicator extends PanelMenu.Button {
         this._box.add_child(this._sepLbl);
         this._box.add_child(this._lTri);
         this._box.add_child(this._lLbl);
+        // index dials (panel-display 'indices'): three name+pct cells,
+        // swapped in for the ▲▼ counts at render time; names are as
+        // long-lived as the session, translated once here
+        this._dialBox = new St.BoxLayout({style_class: 'tg-dialbox',
+                                         visible: false,
+                                         y_align: Clutter.ActorAlign.CENTER});
+        this._dialCells = INDEX_DIALS.map(d => {
+            const cell = new St.BoxLayout({spacing: 3,
+                y_align: Clutter.ActorAlign.CENTER});
+            cell.add_child(new St.Label({style_class: 'tg-dial-name',
+                text: _(d.name), y_align: Clutter.ActorAlign.CENTER}));
+            const val = new St.Label({style_class: 'tg-dial-val tg-dim',
+                text: '—', y_align: Clutter.ActorAlign.CENTER});
+            cell.add_child(val);
+            this._dialBox.add_child(cell);
+            return {sym: d.sym, val};
+        });
+        this._box.add_child(this._dialBox);
         this.add_child(this._box);
 
         // dropdown card
@@ -245,6 +274,18 @@ class TickerIndicator extends PanelMenu.Button {
         return out;
     }
 
+    /* the dials join the fetch round (no watchlist owns them), yet
+     * everything that measures 'held' keeps using _symbols() — so
+     * movers, counts and the app-facing snapshot never meet a dial.
+     * A user who watchlists ^GSPC owns it outright: no extra, and the
+     * dial shares their quote */
+    _dialExtras(syms) {
+        if (this._settings.get_string('panel-display') !== 'indices')
+            return [];
+        return INDEX_DIALS.map(d => d.sym)
+                          .filter(s => !syms.includes(s));
+    }
+
     _heroSymbol() {
         const sel = this._settings.get_string('selected-symbol');
         const syms = this._symbols();
@@ -294,7 +335,8 @@ class TickerIndicator extends PanelMenu.Button {
             return;
         }
         const symbols = this._symbols();
-        if (!symbols.length) {
+        const roundSyms = symbols.concat(this._dialExtras(symbols));
+        if (!roundSyms.length) {
             this._quotes = [];
             this._error = 'empty';
             this._renderPanel();
@@ -304,7 +346,7 @@ class TickerIndicator extends PanelMenu.Button {
         this._busy = true;
         this._panel?.setBusy(true);   // header shows the spinner
         const sparkRange = this._settings.get_string('panel-spark-range');
-        this._client.quotes(symbols, {sparkRange})
+        this._client.quotes(roundSyms, {sparkRange})
             .then(res => {
                 if (this._dead)
                     return;
@@ -317,10 +359,13 @@ class TickerIndicator extends PanelMenu.Button {
                 this._busy = false;
                 this._panel?.setBusy(false);
                 // disk for cold boots, D-Bus push for the live app —
-                // one snapshot shape, two delivery paths (cache.js)
+                // one snapshot shape, two delivery paths (cache.js).
+                // Owners only: the dials are this bar's business, not
+                // the app's scoreboard's
                 const round = makeSnapshot(
                     this._settings.get_string('data-source'),
-                    res.quotes, this._atWall);
+                    res.quotes.filter(q => symbols.includes(q.symbol)),
+                    this._atWall);
                 saveSnapshot(round);
                 const js = snapshotJSON(round);
                 if (js)
@@ -406,7 +451,23 @@ class TickerIndicator extends PanelMenu.Button {
      * counters rest as dim dashes */
 
     _renderPanel() {
-        const qs = this._quotes.filter(q => q.changePct != null);
+        const dialMode =
+            this._settings.get_string('panel-display') === 'indices';
+        if (dialMode) {
+            for (const w of [this._gTri, this._gLbl, this._sepLbl,
+                             this._lTri, this._lLbl])
+                w.visible = false;
+            this._dialBox.visible = true;
+            this._renderDials();
+            return;
+        }
+        for (const w of [this._gTri, this._gLbl, this._sepLbl,
+                         this._lTri, this._lLbl])
+            w.visible = true;
+        this._dialBox.visible = false;
+        const syms = this._symbols();
+        const qs = this._quotes.filter(q => syms.includes(q.symbol) &&
+                                            q.changePct != null);
         const g = qs.filter(q => q.changePct > 0).length;
         const l = qs.filter(q => q.changePct < 0).length;
         const live = qs.length > 0;
@@ -422,6 +483,20 @@ class TickerIndicator extends PanelMenu.Button {
         }
         this._gTri.setDim(!live);
         this._lTri.setDim(!live);
+    }
+
+    /* one em-dash until the round that carries the gauges arrives */
+    _renderDials() {
+        for (const d of this._dialCells) {
+            const q = this._quotes.find(x => x.symbol === d.sym);
+            const p = q?.changePct;
+            d.val.set_text(p == null ? '—' : fmtPct(p));
+            for (const c of ['tg-dial-up', 'tg-dial-down', 'tg-dim'])
+                d.val.remove_style_class_name(c);
+            // zero (or no quote) reads neutral grey like the counts' '—'
+            d.val.add_style_class_name(p > 0 ? 'tg-dial-up'
+                                    : p < 0 ? 'tg-dial-down' : 'tg-dim');
+        }
     }
 
     /* the two worlds of "open the app": plain launch, or first point
@@ -566,6 +641,13 @@ class TickerIndicator extends PanelMenu.Button {
             break;
         case 'panel-spark-range':
             this._fetch(true);       // the dropdown rows' sparks change
+            break;
+        case 'panel-display':
+            // one face swaps for the other, and the fetch roster
+            // changes with it — the bar repaints now, the gauges fill
+            // in on the round that arrives
+            this._renderPanel();
+            this._fetch(true);
             break;
         case 'menu-two-column':
             this._panel.setTwoCol(this._settings.get_boolean('menu-two-column'));

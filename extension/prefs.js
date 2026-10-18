@@ -383,6 +383,19 @@ export default class TickerGlassPrefs extends ExtensionPreferences {
             'active watchlist are up (▲) and down (▼) today. The menu ' +
             'lists its five biggest gainers and five biggest losers — ' +
             'click a ticker to open it wherever you chose below.');
+        const dispIds = ['counts', 'indices'];
+        const dispRow = new Adw.ComboRow({
+            title: _('The bar shows'),
+            model: new Gtk.StringList({strings: [
+                _('▲ gainers · ▼ losers in your watchlists'),
+                _('Index dials — S&P 500, Dow, Nasdaq'),
+            ]}),
+        });
+        dispRow.selected = Math.max(0, dispIds.indexOf(
+            settings.get_string('panel-display')));
+        dispRow.connect('notify::selected', () =>
+            settings.set_string('panel-display', dispIds[dispRow.selected]));
+        g.add(dispRow);
         page.add(g);
 
         const g2 = new Adw.PreferencesGroup({title: _('Dropdown rows')});
