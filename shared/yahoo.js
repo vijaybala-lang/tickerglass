@@ -894,27 +894,37 @@ export class NasdaqClient {
     }
 
     _loadClass() {
+        // async: this module ships inside the shell extension, where
+        // synchronous file IO blocks the compositor (EGO-X-004).
+        // Lookups before the read lands just miss and re-probe — the
+        // existing miss path; the merge never overwrites a fresher
+        // in-memory classification with an older disk entry
         try {
             // load_contents (not load_bytes: this build's binding hands
             // back a GBytes that lacks get_data) — bytes come as Uint8Array
-            const [ok, bytes] = this._cacheFile().load_contents(null);
-            if (!ok || !bytes)
-                return;
-            const m = JSON.parse(new TextDecoder().decode(bytes));
-            const now = GLib.get_real_time() / 1e6;
-            for (const [sym, e] of Object.entries(m))
-                if (e && typeof e.exp === 'number' && e.exp > now)
-                    this._class.set(sym, e);
+            this._cacheFile().load_contents_async(null, (file, res) => {
+                try {
+                    const [ok, bytes] = file.load_contents_finish(res);
+                    if (!ok || !bytes)
+                        return;
+                    const m = JSON.parse(new TextDecoder().decode(bytes));
+                    const now = GLib.get_real_time() / 1e6;
+                    for (const [sym, e] of Object.entries(m)) {
+                        const cur = this._class.get(sym);
+                        if (e && typeof e.exp === 'number' && e.exp > now &&
+                                !(cur && cur.exp > e.exp))
+                            this._class.set(sym, e);
+                    }
+                } catch { /* first boot, no file — fine */ }
+            });
         } catch { /* first boot, no file — fine */ }
     }
 
     _saveClass() {
         try {
             const m = Object.fromEntries(this._class);
-            const dir = this._cacheFile().get_parent();
-            try {
-                dir.make_directory(null);   // EXISTS just means already fine
-            } catch { /* already there */ }
+            GLib.mkdir_with_parents(
+                this._cacheFile().get_parent().get_path(), 0o755);
             const out = new GLib.Bytes(new TextEncoder().encode(
                 JSON.stringify(m)));
             // this GJS/GIO build has neither FileCreateFlags nor

@@ -31,9 +31,10 @@ APP="$ROOT/dist/app"
 rm -rf "$ROOT/dist"
 mkdir -p "$EXT/schemas" "$APP"
 
-# extension
+# extension (fetch.js deliberately NOT copied: only the app imports
+# it, and an unreachable file in the zip is an EGO-P-007 finding)
 cp "$ROOT"/extension/{metadata.json,extension.js,menu.js,prefs.js,i18n.js,stylesheet.css} "$EXT/"
-cp "$ROOT"/shared/{fmt.js,mock.js,yahoo.js,spark.js,prompt.js,fetch.js,cache.js} "$EXT/"
+cp "$ROOT"/shared/{fmt.js,mock.js,yahoo.js,spark.js,prompt.js,cache.js} "$EXT/"
 cp "$ROOT"/schemas/org.gnome.shell.extensions.tickerglass.gschema.xml "$EXT/schemas/"
 glib-compile-schemas "$EXT/schemas"
 

@@ -48,7 +48,7 @@ fi
 # ── app ──────────────────────────────────────────────────────────────────
 APPDEST="$DATA/tickerglass"
 mkdir -p "$APPDEST"
-cp "$ROOT/dist/app/"* "$APPDEST/"
+cp -r "$ROOT/dist/app/"* "$APPDEST/"
 
 DESK="$DATA/applications/dev.vijaybala.TickerGlass.desktop"
 mkdir -p "$(dirname "$DESK")"
@@ -71,5 +71,5 @@ echo "App       → $APPDEST  (launcher: TickerGlass in your app grid)"
 echo "Schema    → $DATA/glib-2.0/schemas/$SCHEMA"
 echo
 echo "Run the app:  gjs -m $APPDEST/main.js"
-echo "If the panel sparkline doesn't appear, log out and back in — GNOME 50"
+echo "If the panel sparkline doesn't appear, log out and back in — GNOME Shell"
 echo "caches extension ES modules inside the shell process."

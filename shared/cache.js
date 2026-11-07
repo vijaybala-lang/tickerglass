@@ -16,11 +16,14 @@
  * Layout: ~/.cache/tickerglass/quotes.json
  *   {v, at (unix s), source ('yahoo'|'nasdaq'), quotes: [...]}
  *
- * IO mirrors shared/yahoo.js's classification cache idiom exactly —
+ * IO mirrors shared/yahoo.js's classification cache idiom —
  * this GJS/GIO build lacks FileCreateFlags/replace_bytes and
- * load_bytes.get_data, so: load_contents + TextDecoder to read,
- * replace + write_bytes + close to write. Cache is a luxury; every
- * call is fire-and-forget.
+ * load_bytes.get_data, so: TextDecoder over async-read bytes to
+ * read, replace + write_bytes + close to write. The read is async
+ * because this file ships inside the shell extension: no
+ * synchronous file IO in shell code (EGO-X-004). Cache is a
+ * luxury; every call is fire-and-forget and resolves null on
+ * any failure.
  */
 
 import Gio from 'gi://Gio';
@@ -54,10 +57,10 @@ export function saveSnapshot(snap) {
         if (!snap || !snap.quotes?.length)
             return;
         const file = cacheFile();
-        const dir = file.get_parent();
-        try {
-            dir.make_directory(null);      // EXISTS just means already fine
-        } catch { /* already there */ }
+        // with-parents: ~/.cache itself may not exist yet on a
+        // minimal first login — one-level make_directory would
+        // silently lose every snapshot there
+        GLib.mkdir_with_parents(file.get_parent().get_path(), 0o755);
         const out = new GLib.Bytes(new TextEncoder().encode(
             JSON.stringify(snap)));
         const st = file.replace(null, false, 0, null);
@@ -66,13 +69,8 @@ export function saveSnapshot(snap) {
     } catch { /* cache is a luxury; never break a round over it */ }
 }
 
-/* null when absent, corrupt, wrong-version, too old, or empty —
- * callers treat null as "no cache", which is exactly what it is */
-export function loadSnapshot(maxAgeSec = 24 * 3600) {
+function _parseSnapshot(bytes, maxAgeSec) {
     try {
-        const [ok, bytes] = cacheFile().load_contents(null);
-        if (!ok || !bytes)
-            return null;
         const snap = JSON.parse(new TextDecoder().decode(bytes));
         if (snap?.v !== SNAPSHOT_VERSION || !Array.isArray(snap.quotes) ||
                 !snap.quotes.length)
@@ -82,4 +80,27 @@ export function loadSnapshot(maxAgeSec = 24 * 3600) {
     } catch {
         return null;
     }
+}
+
+/* Resolves the snapshot, or null when absent, corrupt,
+ * wrong-version, too old, or empty — callers treat null as
+ * "no cache", which is exactly what it is. Async because this
+ * module ships in the shell: the warm-boot paint lands a beat
+ * after enable instead of blocking it on disk. */
+export function loadSnapshotAsync(maxAgeSec = 24 * 3600) {
+    return new Promise(resolve => {
+        try {
+            cacheFile().load_contents_async(null, (file, res) => {
+                try {
+                    const [ok, bytes] = file.load_contents_finish(res);
+                    resolve(ok && bytes
+                        ? _parseSnapshot(bytes, maxAgeSec) : null);
+                } catch {
+                    resolve(null);
+                }
+            });
+        } catch {
+            resolve(null);
+        }
+    });
 }

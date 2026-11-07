@@ -35,7 +35,7 @@ import {MarketClient} from './yahoo.js';
 import {paintChart, paintMiniSpark, paintTri} from './spark.js';
 import {textPrompt} from './prompt.js';
 import {DataFetcher} from './fetch.js';
-import {loadSnapshot, saveSnapshot, makeSnapshot} from './cache.js';
+import {loadSnapshotAsync, saveSnapshot, makeSnapshot} from './cache.js';
 
 /* the extension's data service (extension/extension.js owns this bus
  * name); the app is only a guest — absent provider means the app works
@@ -3434,9 +3434,14 @@ class TickerWindow extends Adw.ApplicationWindow {
      * boots, the Updated signal for live. No extension installed?
      * Every path below no-ops and the app polls itself as always. */
     _loadDiskFeed() {
-        const snap = loadSnapshot();
-        if (snap)
-            this._applyFeed(snap.quotes, snap.at, snap.source);
+        // async (the shared cache module does no sync IO — it ships
+        // in the shell too); freshness-guarded so a live round that
+        // landed first is never painted over with older disk state
+        loadSnapshotAsync().then(snap => {
+            if (snap && !this._dead &&
+                    (snap.at ?? 0) >= (this._atWall ?? 0))
+                this._applyFeed(snap.quotes, snap.at, snap.source);
+        });
     }
 
     _watchSharedFeed() {

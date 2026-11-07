@@ -16,7 +16,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 # tools/shellcheck.sh — end-to-end proof that the built extension runs:
-# boots a headless nested gnome-shell (GNOME 50: --headless --virtual-monitor
+# boots a headless nested gnome-shell (--headless --virtual-monitor
 # --no-x11) in a clean HOME with ONLY tickerglass + the icontest probe,
 # toggles the card open/closed, and greps the journal for trouble.
 # Demo data source, so no network. Exit 0 = extension is good.
@@ -60,7 +60,7 @@ timeout 180 dbus-run-session -- bash -c "
 RC=$?
 
 echo "--- verdict ---"
-ERRS=$(grep -cE "JS ERROR|TickerGlass.*logError|\[ERROR\]|CRITICAL|assertion" "$LOG")
+ERRS=$(grep -cE "JS ERROR|Extension [^:]+: Error:|TickerGlass.*logError|\[ERROR\]|CRITICAL|assertion" "$LOG")
 RUNS=$(grep -c "TickerGlass v" "$LOG")
 DONE=$(grep -c "icontest: DONE" "$LOG")
 DATA=$(grep -Eo "rows=[0-9]+ quotes=[0-9]+ heroHist=[^ ]+ panelPrice='[^']*'" "$LOG" | tail -1)
