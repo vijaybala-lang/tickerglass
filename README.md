@@ -25,7 +25,7 @@ watchlist in one, the other follows instantly.
   for the test harness — switchable in prefs or via gsettings
 - Panel modes: sparkline / ticker / price; market-hours-aware refresh;
   HiDPI-aware cairo painting (~20 fps, pauses when the menu is closed)
-- GNOME Shell **50** (ES modules), GTK 4 + libadwaita app under plain `gjs`
+- GNOME Shell **50 / 51** (ES modules), GTK 4 + libadwaita app under plain `gjs`
 
 ![TickerGlass: sparkline watchlist sidebar, chart with news feed](screenshot.png)
 
@@ -38,7 +38,7 @@ watchlist in one, the other follows instantly.
 That installs the shared gsettings schema, the shell extension, and the app
 (to `~/.local/share/tickerglass` plus a `.desktop` entry). Then:
 
-- **Extension**: log out and back in (GNOME 50 only scans
+- **Extension**: log out and back in (GNOME Shell only scans
   `~/.local/share/gnome-shell/extensions` at login), then enable it in the
   Extensions app. A sparkline appears in the panel; ⚙ in its menu opens
   preferences.
@@ -102,7 +102,7 @@ gsettings set org.gnome.shell.extensions.tickerglass data-source yahoo-relay
 
 ## Editing the code? Restart the shell session
 
-GNOME Shell 50 caches an extension's ES modules inside the long-lived
+GNOME Shell caches an extension's ES modules inside the long-lived
 `gnome-shell` process, and there is no `ReloadCode` anymore — so after
 editing `extension/*.js` or `shared/*.js` you must log out and back in (or
 test instantly with `./tools/shellcheck.sh`, which boots a throwaway nested
@@ -117,7 +117,15 @@ gjs -m tools/syntax-check.mjs    # parse every module under gjs
 gjs -m tools/imports-check.mjs   # verify imports resolve + schema keys line up
 gjs -m tools/preview.mjs         # painter regression PNGs → /tmp/tickerglass-preview
 ./tools/shellcheck.sh            # nested-shell boot + paint assertions
+./tools/certify.sh               # full pre-upload ladder: the above + EGO zip
+                                 # installed & booted (zipcheck) + shexli review engine
+./tools/qa/run-old-shell.sh 44   # same zip certified on GNOME 50 (Fedora 44 guest)
 ```
+
+Releases (extensions.gnome.org + GitHub) follow one ritual:
+[`skills/tickerglass-release/SKILL.md`](skills/tickerglass-release/SKILL.md)
+— every command in order; `ego-upload-notes.md` holds the EGO-page
+material, `tools/DEVELOPMENT.md` the review principles.
 
 ## License
 

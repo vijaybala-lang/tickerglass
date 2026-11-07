@@ -1,4 +1,4 @@
-# Extension development loop (GNOME 50)
+# Extension development loop (GNOME 50 / 51)
 
 ## The law: code is imported ONCE per login
 
@@ -39,6 +39,7 @@ otherwise have been discovered at a login screen:
 | St-18 busy spinner | there is NO `St.Icon.spinning` and no themed spinner frames in this GNOME — animate with the file's own proven kit: `St.DrawingArea` + `vfunc_repaint` + frame timer + `queue_repaint` (the weatherglass sky pattern, already shipped here as `Tri`/`MiniSpark`); Clutter z-rotation about `pivot-point` (default = top-left corner!) was tried and reads as a wobble | "reload animation all messed up" |
 | Shell-process D-Bus | the extension can OWN a session-bus name and export interfaces (`Gio.DBusExportedObject.wrapJSObject`, `connection.own_name`, `new_for_xml` — gjs-probed on this build); single-out-arg methods return the BARE value (arrays are marshalling errors); `unexport` takes ZERO args on this binding (2-arg warns + no-ops; live-bus probe proved 0-arg detaches); `g_bus_unown_name` has no GJS twin → release via an `org.freedesktop.DBus.ReleaseName` call; self-process `call_sync` to one's own export reports bogus UnknownMethod — test with an external client (gdbus) | the app↔extension data plane (provider in extension.js, guest in window.js) |
 | GNOME 50 extension API | `Main.extensionManager.lookup(uuid)` now returns the C wrapper — `openPreferences` lives on the JS Extension instance (what `enable()` receives; keep it, WeatherGlass-style, or use `Extension.lookupByUUID`). Hot-reload without logout: `gnome-extensions disable UUID && enable UUID` — GNOME 50's CLI dropped `reload` but the pair is the same thing | gear "doesn't actually open the settings dialog" — journal showed `openPreferences is not a function` |
+| GNOME 51 port | St removed the `vertical` property (deprecated in 48; PyGObject `list_properties` on St-51: BoxLayout has `orientation`, no `vertical` — a ctor `vertical: true` THROWS like x_fill did). Replacement `orientation: Clutter.Orientation.VERTICAL` exists since 48, so one code path serves 50+51; `syntax-check.mjs` now FAILs on `vertical:` inside any `new St.*({...})`. PopupMenu `open()`/`close()` take a params object (`{animate, fadeOnly}`) in 51 — a boolean arg only works by destructuring accident (`{animate=true} = true`), so call with no argument (animated on both versions). `disable()` must stay synchronous (51 throws on async; ours already is). Verified: `shellcheck.sh` PASS on shell 51.1 (before the port both extensions landed OUT_OF_DATE) | extension dead on GNOME 51 until metadata learned "51" AND menu.js dropped `vertical` |
 | Nasdaq payload traps | `marketStatus` sends **'After-Hours'** (the mapping's `'Post-Market'` key never matched → after-hours silently read REGULAR); during PRE/POST `primaryData` speaks the EXTENDED print vs today's close (336.80/+0.04%) while `secondaryData` speaks the regular session (336.67/+0.91%) — headline must read secondary outside REGULAR; `/chart` previousClose is an unreliable stranger (332.89 when /info AND Yahoo both say 333.63) — never trust it; `/chart` series includes pre+after prints (probe: 90/390/462 bars pre/reg/post) so session bands need computed ET slots (04:00/09:30–16:00/20:00, GLib.DateTime tz-build handles DST) | "still not seeing it" — all three hit at once on data-source=nasdaq |
 | AdwPreferencesGroup rebuild | it is NOT a Gtk.Box: `get_last_child()` yields its internal GtkBox and remove() on those trips adw-preferences-group.c:430 ("non-child" warnings, silently removes nothing → rebuild duplicates rows) — keep a JS array of the widgets passed to add() and remove exactly those | prefs watchlist page spammed 11 warnings and churned rows |
 | Clutter typelib (GNOME 50) | foreign gjs can no longer require Clutter (typelib not exposed; St still works) — so menu.js's headless full-load in syntax-check reports environmental 'Typelib not found', which the harness must NOT treat as failure (only SyntaxError counts); live-shell load is the gate | checker cried wolf after the Main-import removal made menu.js eligible for full-load |
@@ -47,6 +48,56 @@ otherwise have been discovered at a login screen:
 | typeahead focus | a mapping Gtk.Popover steals keyboard focus from the entry — fine for the app's Gtk.SearchEntry (survives somehow) but Adw.EntryRow's caret dies there: set_can_focus(false) on scroller/listbox/rows (single-click activation needs none), re-grab the entry after every popup(), popdown on entry focus-out; Enter-to-pick must live on the ENTRY (entry-activated), not on list navigation | "as I type the focus is lost on the input box and placed on the search results" |
 | Google Finance quote URLs | HTTP 200 proves NOTHING — Google answers 200 for every /quote/ guess; verify by <title>. Verified shapes: stocks need the tail (CRWD:NASDAQ; bare CRWD → generic 'Google Finance' page), ETFs SPY:NYSEARCA (Nasdaq API labels Arca 'PSE'), indices .INX:INDEXSP / .IXIC:INDEXNASDAQ / .DJI:INDEXDJX / RUT:INDEXRUSSELL (dot form, verified set only — ^NDX/^VIX shapes elude), crypto bare BTC-USD, fx EURUSD=X → EUR-USD. Unverifiable → fall back to Yahoo, never a Google shrug | "for google option, it doesn't seem to open the correct url" — first map was built on 200-probes and wrong everywhere |
 | app-side | relaunch app, grep stderr | anything |
+| EGO zip as shipped | `tools/zipcheck.sh` (inside `tools/certify.sh`): the real upload zip via `gnome-extensions install` into a clean HOME + nested boot + paint gate — the dist DIRECTORY booting (shellcheck) does not prove the ZIP (layout, XML-only schema, installer compile) | "worked from the checkout" shipping a zip EGO rejects or a shell can't install |
+| EGO review engine | `tools/shexli-check.sh` over the dist zip every certify — v1 prep filed 4 findings (3 real: sync IO reads, unreachable fetch.js, unrecognizable timer-removal loop; 1 stale-spec EGO-M-004 vs shell 51, exempted narrowly + loudly) | learning review findings from the reviewer instead of locally |
+| older-shell support | a `shell-version` slot is earned per major, not per machine: Fedora-guest cert on the same zip bytes (`tools/qa/run-old-shell.sh`; Fedora N = GNOME N+6) — GNOME 50 earned its slot this way after the 51 port shipped on guide evidence alone | claiming a shell no gate ever booted |
+
+## Pre-upload release review (mandatory before any EGO zip)
+
+Before building the ZIP for extensions.gnome.org, review the full
+diff since the last released version and simplify the code in its
+wake (commands: the release skill, step 0):
+
+1. **Justify every hunk.** Each change must trace to a
+   user-reported issue or a described feature. Anything you cannot
+   explain — leftovers from debugging rounds, superseded
+   experiments (an option whose consumer was deleted, a helper
+   nothing calls) — gets removed in a follow-up commit before
+   packaging.
+2. **Sweep dead & repetitive code.** Grep every exported symbol
+   for consumers; delete orphans (the app-only `fetch.js` riding
+   in the extension zip was exactly this). Near-equal blocks in
+   two or more places become a helper.
+3. **Audit against the official rules.** Apply the EGO
+   [review guidelines](https://gjs.guide/extensions/review-guidelines/review-guidelines.html)
+   and [best practices](https://gjs.guide/extensions/review-guidelines/best-practices.html)
+   — distilled for our two extensions in weatherglass's
+   [BEST-PRACTICES.md](https://github.com/vijaybala-lang/weatherglass/blob/master/BEST-PRACTICES.md)
+   — to every file that changed since the previous tag: lifecycle
+   cleanup, process isolation, modern GJS, clean-code rules,
+   settings/metadata hygiene, ZIP contents. The token rules are
+   machine-enforced (syntax-check guards + the shexli stage in
+   certify); this audit is the semantic half no regex can see.
+   Fix findings in the same pass; escalate anything that
+   contradicts how this extension provably works with a comment
+   for the reviewer and a standing answer in `ego-upload-notes.md`.
+4. **Verify & bump.** The version-bump rules (review rounds never
+   bump), the certify gate on the release commit, per-shell guest
+   certs on the same zip bytes, and the zip + sha record live in
+   the skill. Certification is per shell, not per machine: a
+   shell version without a current cert does not ride in the
+   metadata — and a version that would need branched code to keep
+   is dropped, per best practices.
+5. **Live verification.** Headless gates prove the zip boots;
+   only a live session proves the card. The install / login /
+   surface-walk sequence and the byte-identity rule ("the
+   verified zip IS the uploaded zip") live in the skill.
+
+Every concrete release command — review through upload to
+post-approval hygiene — lives in
+[`skills/tickerglass-release/SKILL.md`](../skills/tickerglass-release/SKILL.md),
+in one canonical order. Read the principles above as the *why*;
+the skill is the *how*.
 
 ## Deploy loop
 
