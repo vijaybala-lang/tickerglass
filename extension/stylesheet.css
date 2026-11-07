@@ -37,6 +37,7 @@
 /* index dials swap in for the ▲▼ counts (panel-display 'indices');
  * names whisper, the pct carries the count's palette */
 .tg-dialbox { spacing: 10px; }
+.tg-dial-cell { spacing: 3px; }
 .tg-panel-box .tg-dial-name { color: rgba(255, 255, 255, 0.55); }
 .tg-panel-box .tg-dial-up   { color: #2eff8f; }
 .tg-panel-box .tg-dial-down { color: #ff5c6c; }

@@ -105,6 +105,21 @@ for (const path of [...files.map(f => `${DIST}/${f}`),
         bad++;
         continue;
     }
+    for (const m of src.matchAll(/new\s+St\.BoxLayout\s*\(\s*\{([^}]*)\}/g)) {
+        if (/\bspacing\s*:/.test(m[1])) {
+            console.log(`FAIL  ${path}: St.BoxLayout has no 'spacing' GObject property (use CSS spacing on style_class)`);
+            bad++;
+        }
+    }
+    /* GNOME 51 removed the St 'vertical' property (deprecated in 48):
+     * passing it to a constructor throws and the card never builds.
+     * orientation: Clutter.Orientation.VERTICAL works on 50 and 51 */
+    for (const m of src.matchAll(/new\s+St\.[A-Za-z]+\s*\(\s*\{([^}]*)\}/g)) {
+        if (/\bvertical\s*:/.test(m[1])) {
+            console.log(`FAIL  ${path}: St widgets have no 'vertical' property since GNOME 51 (use orientation: Clutter.Orientation.VERTICAL)`);
+            bad++;
+        }
+    }
     for (const m of src.matchAll(
         /import\s*\{([^}]+)\}\s*from\s*['"](\.[^'"]+)['"]/g)) {
         const target = `${GLib.path_get_dirname(path)}/${m[2]}`;

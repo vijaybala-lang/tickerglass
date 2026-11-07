@@ -38,7 +38,7 @@ import {TickerPanel, Tri} from './menu.js';
 import {initI18n, _} from './i18n.js';
 import {parseWatchlists, fmtPct} from './fmt.js';
 import {makeSnapshot, snapshotJSON, saveSnapshot,
-        loadSnapshot} from './cache.js';
+        loadSnapshotAsync} from './cache.js';
 
 /* ── the D-Bus data plane ─────────────────────────────────────────────────
  * The shell is the only always-running member of this family, so it
@@ -169,7 +169,7 @@ class TickerIndicator extends PanelMenu.Button {
                                          visible: false,
                                          y_align: Clutter.ActorAlign.CENTER});
         this._dialCells = INDEX_DIALS.map(d => {
-            const cell = new St.BoxLayout({spacing: 3,
+            const cell = new St.BoxLayout({style_class: 'tg-dial-cell',
                 y_align: Clutter.ActorAlign.CENTER});
             cell.add_child(new St.Label({style_class: 'tg-dial-name',
                 text: _(d.name), y_align: Clutter.ActorAlign.CENTER}));
@@ -201,8 +201,10 @@ class TickerIndicator extends PanelMenu.Button {
         // calls this before onOpenPrefs) — close now. GNOME 50 law:
         // openPreferences lives on the JS Extension instance (the one
         // enable() receives, kept as this._ext), NOT on what
-        // extensionManager.lookup() returns — that's the C wrapper now
-        this._panel.onCloseMenu = () => this.menu.close(true);
+        // extensionManager.lookup() returns — that's the C wrapper now.
+        // No argument: GNOME 51 changed close() to a params object
+        // ({animate}); the no-arg animated close means the same on 50
+        this._panel.onCloseMenu = () => this.menu.close();
         this._panel.onOpenPrefs = () => this._ext.openPreferences();
         this.menu.actor.add_style_class_name('tg-menu');
         // zero the popup wrappers' chrome — but start ABOVE the panel
@@ -237,14 +239,17 @@ class TickerIndicator extends PanelMenu.Button {
 
         // warm boot from the disk snapshot: paint whatever the last
         // round left (the app's or ours), then let the normal schedule
-        // refresh it — a fresh login never sees an empty card
-        const snap = loadSnapshot();
-        if (snap) {
+        // refresh it — a fresh login never sees an empty card. Async
+        // (no sync IO in shell code): lands a beat after enable, and
+        // never over a live round that beat it home
+        loadSnapshotAsync().then(snap => {
+            if (!snap || this._dead || (snap.at ?? 0) < (this._atWall ?? 0))
+                return;
             this._quotes = snap.quotes;
             this._atWall = snap.at;
             this._renderPanel();
             this._panel.render(this._state());
-        }
+        });
         this._serveData();
         this._fetch(true);
         this._restartTimer();
@@ -676,9 +681,14 @@ class TickerIndicator extends PanelMenu.Button {
     destroy() {
         this._dead = true;
         this._stopServing();
-        for (const id of [this._timer, this._retryTimer])
-            if (id)
-                GLib.source_remove(id);
+        // spelled out, not looped: same removals, in the literal form
+        // EGO's lifecycle checker (EGO-L-004) can see
+        if (this._timer)
+            GLib.source_remove(this._timer);
+        this._timer = 0;
+        if (this._retryTimer)
+            GLib.source_remove(this._retryTimer);
+        this._retryTimer = 0;
         if (this._settingsId)
             this._settings.disconnect(this._settingsId);
         if (this._ifaceId)

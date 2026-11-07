@@ -2,5 +2,5 @@
   "uuid": "icontest@vijaybala.dev",
   "name": "TickerGlass Icon Test (dev probe)",
   "description": "Nested-shell test companion: toggles the TickerGlass popup open/closed to prove the card paints without aborting the shell.",
-  "shell-version": ["50"]
+  "shell-version": ["50", "51"]
 }

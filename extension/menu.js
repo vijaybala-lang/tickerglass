@@ -199,8 +199,11 @@ export class TickerPanel {
         // a live PopupMenu holds Clutter's input grab and the prefs
         // window can't surface over it (classic openPrefs-from-menu bug)
         this.onCloseMenu = null;
+        // orientation, not vertical: St removed the 'vertical'
+        // property in GNOME 51 (deprecated in 48) — passing it in a
+        // constructor throws and the card never builds
         this.actor = new St.BoxLayout({style_class: 'tg-content',
-                                       vertical: true});
+                                       orientation: Clutter.Orientation.VERTICAL});
         if (this._twoCol)
             this.actor.add_style_class_name('tg-2col');
         if (!this._dark)
@@ -219,7 +222,8 @@ export class TickerPanel {
     }
 
     _buildPlaceholder() {
-        let box = new St.BoxLayout({vertical: true, style_class: 'tg-placeholder',
+        let box = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL,
+                                    style_class: 'tg-placeholder',
                                     visible: false});
         this._phLbl = new St.Label({text: _('Loading…'), style_class: 'tg-placeholder-text',
                                     x_align: Clutter.ActorAlign.CENTER,
@@ -230,7 +234,8 @@ export class TickerPanel {
     }
 
     _buildMain() {
-        const m = new St.BoxLayout({vertical: true, style_class: 'tg-main',
+        const m = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL,
+                                    style_class: 'tg-main',
                                     visible: false});
 
         /* header: the card's one heading, market status, settings and
@@ -274,7 +279,8 @@ export class TickerPanel {
         m.add_child(head);
 
         /* symbol rows */
-        this._rows = new St.BoxLayout({vertical: true, style_class: 'tg-rows'});
+        this._rows = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL,
+                                       style_class: 'tg-rows'});
         m.add_child(this._rows);
 
         /* open the desktop app — the card is a glance; the window is
@@ -445,7 +451,7 @@ export class TickerPanel {
          * empty the card narrows itself back to stacked rows: a column
          * of nothing wastes half a 500px card */
         const moverCol = (qs, up) => {
-            const c = new St.BoxLayout({vertical: true,
+            const c = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL,
                                         style_class: 'tg-col',
                                         x_align: Clutter.ActorAlign.FILL,
                                         x_expand: true});
@@ -499,7 +505,7 @@ export class TickerPanel {
         // Tri's y_center, hero's END — demonstrably work).
         const wrap = new St.BoxLayout({style_class: 'tg-row-wrap',
                                        x_align: Clutter.ActorAlign.FILL});
-        const leftV = new St.BoxLayout({vertical: true,
+        const leftV = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL,
                                         style_class: 'tg-row-left',
                                         x_align: Clutter.ActorAlign.FILL,
                                         x_expand: true});
@@ -516,7 +522,7 @@ export class TickerPanel {
                               'tg-row-name'));
         wrap.add_child(leftV);
         // independent right column, centered against the two lines
-        const praw = new St.BoxLayout({vertical: true,
+        const praw = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL,
                                        style_class: 'tg-row-praw',
                                        y_align: Clutter.ActorAlign.CENTER});
         praw.add_child(new St.Label({
