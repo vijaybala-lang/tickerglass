@@ -1,4 +1,4 @@
-# TickerGlass — a stock ticker for your GNOME panel (and a desk for your desk)
+# TickerGlass — a stock ticker for your GNOME panel
 
 A tiny window onto the market. An animated sparkline of your hero symbol
 lives in the panel; clicking it opens a card with a big live price, a
